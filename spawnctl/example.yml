@@ -1,0 +1,13 @@
+{{$base := "castle.bw2.io/soda/410"}}
+foobuzz:
+  demosvc:
+    entity: demokey.key
+    container: immesys/spawnpoint:amd64
+    aptrequires: python3
+    source: git+http://github.com/immesys/demosvc
+    build:
+      go build -o demosvc
+    run: [demosvc, "hello world"]
+    params:
+      message: "hello world"
+      to: {{$base}}/funtimes/info/dsvc/out
