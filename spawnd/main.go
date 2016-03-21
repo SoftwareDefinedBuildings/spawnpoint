@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/base64"
+    "errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+    "strconv"
 	"strings"
+    "sync"
 	"time"
 
 	bw2 "github.com/immesys/bw2bind"
@@ -17,6 +20,8 @@ type Config struct {
 	Alias       string
 	Path        string
 	LocalRouter string
+    MemAlloc    string
+    CpuShares   uint64
 }
 
 var BWC *bw2.BW2Client
@@ -24,6 +29,12 @@ var PAC string
 var Us string
 var Cfg Config
 var olog chan SLM
+var totalMem uint64 // Memory dedicated to Spawnpoint, in MiB
+var totalCpuShares uint64 // CPU shares for Spawnpoint, 1024 per core
+var availableMem uint64
+var availableCpuShares uint64
+
+var availLock sync.Mutex
 
 type SLM struct {
 	Service string
@@ -45,6 +56,19 @@ func main() {
 		fmt.Println("Config file error: ", err)
 		os.Exit(1)
 	}
+
+    totalCpuShares = Cfg.CpuShares
+    availableCpuShares = totalCpuShares
+
+    rawMem := Cfg.MemAlloc
+    memAlloc, err := parseMemAlloc(rawMem)
+    if err != nil {
+        fmt.Println("Invalid Spawnpoint memory allocation: ", err)
+        os.Exit(1)
+    }
+    totalMem = memAlloc
+    availableMem = totalMem
+
 	if Cfg.LocalRouter == "" {
 		Cfg.LocalRouter = "127.0.0.1:28589"
 	}
@@ -53,6 +77,7 @@ func main() {
 		fmt.Println("Could not connect to local router: ", err)
 		os.Exit(1)
 	}
+
 	Us, err = BWC.SetEntityFile(Cfg.Entity)
 	if err != nil {
 		fmt.Println("Could not set entity: ", err)
@@ -65,6 +90,7 @@ func main() {
 	}
 	PAC = pac.Hash
 	fmt.Println("Connected to router and obtained permissions")
+
 	//Start docker connection
 	err = ConnectDocker()
 	if err != nil {
@@ -89,10 +115,12 @@ func main() {
 		fmt.Println("Could not subscribe to restart URI: ", err)
 		os.Exit(1)
 	}
+
 	olog = make(chan SLM, 100)
 	go doOlog()
-	go hearbeat()
+	go heartbeat()
 	fmt.Println("spawnpoint active")
+
 	for {
 		select {
 		case ncfg := <-newconfigs:
@@ -170,14 +198,23 @@ func doOlog() {
 	}
 }
 
-func hearbeat() {
+func heartbeat() {
 	for {
+        availLock.Lock()
+        mem := availableMem
+        shares := availableCpuShares
+        availLock.Unlock()
+
 		msg := struct {
-			Alias string
-			Time  string
+            Alias              string
+			Time               string
+            AvailableMem       uint64
+            AvailableCpuShares uint64
 		}{
 			Cfg.Alias,
 			time.Now().Format(time.RFC3339),
+            mem,
+            shares,
 		}
 		po, err := bw2.CreateYAMLPayloadObject(bw2.FromDotForm(SpawnPointHeartbeatType), msg)
 		if err != nil {
@@ -219,7 +256,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	defer func() {
 		r := recover()
 		if r != nil {
-			olog <- SLM{Service: "meta", Message: "Error in configurationfile : " + fmt.Sprintf("%+v", r)}
+			olog <- SLM{Service: "meta", Message: "Error in configuration file : " + fmt.Sprintf("%+v", r)}
 		}
 	}()
 	curconfig = make(map[string]Manifest)
@@ -234,6 +271,19 @@ func handleConfig(m *bw2.SimpleMessage) {
 	}
 	for svcname, val := range toplevel {
 		svc := val.(map[interface{}]interface{})
+
+        rawMem := svc["memAlloc"].(string)
+        memAlloc, err := parseMemAlloc(rawMem)
+        if err != nil {
+            panic(err)
+        }
+
+        rawCpuShares := svc["cpuShares"].(string)
+        cpuShares, err := strconv.ParseUint(rawCpuShares, 0, 64)
+        if err != nil {
+            panic(err)
+        }
+
 		econtents, err := base64.StdEncoding.DecodeString(svc["entity"].(string))
 		if err != nil {
 			panic(err)
@@ -269,10 +319,27 @@ func handleConfig(m *bw2.SimpleMessage) {
 		for idx, val := range svc["run"].([]interface{}) {
 			run[idx] = val.(string)
 		}
+
+        // Check if Spawnpoint has sufficient resources. If not, reject configuration
+        availLock.Lock()
+        defer availLock.Unlock()
+        if memAlloc > availableMem {
+            err = errors.New("Insufficient Spawnpoint memory for requested allocation")
+            panic(err)
+        } else if cpuShares > availableCpuShares {
+            err = errors.New("Insufficient Spawnpoint CPU shares for requested allocation")
+            panic(err)
+        } else {
+            availableMem -= memAlloc
+            availableCpuShares -= cpuShares
+        }
+
 		mf := Manifest{
 			ServiceName: svcname,
 			Entity:      econtents,
 			Container:   svc["container"].(string),
+            MemAlloc:    memAlloc,
+            CpuShares:   cpuShares,
 			Build:       buildcontents,
 			Run:         run,
 		}
@@ -299,7 +366,26 @@ type Manifest struct {
 	ServiceName string
 	Entity      []byte
 	Container   string
+    MemAlloc    uint64
+    CpuShares   uint64
 	//Automatically add the source stuff to the front of Build
 	Build []string
 	Run   []string
+}
+
+func parseMemAlloc(alloc string) (uint64, error) {
+    suffix := alloc[len(alloc)-1:]
+    memAlloc, err := strconv.ParseUint(alloc[:len(alloc)-1], 0, 64)
+    if err != nil {
+        return memAlloc, err
+    }
+
+    if suffix == "G" || suffix == "g" {
+        memAlloc *= 1024
+    } else if suffix != "M" && suffix != "m" {
+        err = errors.New("Memory allocation amount must be in units of M or G")
+        return memAlloc, err
+    }
+
+    return memAlloc, nil
 }

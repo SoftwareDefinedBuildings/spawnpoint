@@ -163,6 +163,8 @@ func RestartContainer(cfg *Manifest, log chan SLM) (*SpawnPointContainer, error)
 			AttachStdout: true,
 			AttachStderr: true,
 			AttachStdin:  true,
+            Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
+            CPUShares:    int64(cfg.CpuShares),
 		},
 		HostConfig: &docker.HostConfig{
 			NetworkMode: "host",
