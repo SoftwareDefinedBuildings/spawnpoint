@@ -16,7 +16,7 @@ type SpawnPointContainer struct {
 	ServiceName string
 }
 
-func ConnectDocker() error {
+func ConnectDocker() (chan *docker.APIEvents, error) {
 	var err error
 	DKR, err = docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
@@ -25,11 +25,7 @@ func ConnectDocker() error {
 	}
 	ec := make(chan *docker.APIEvents)
 	DKR.AddEventListener(ec)
-	go func() {
-		e := <-ec
-		fmt.Printf("Event: %+v\n", e)
-	}()
-	return err
+	return ec, err
 }
 
 type ContainerLogger struct {
@@ -163,8 +159,8 @@ func RestartContainer(cfg *Manifest, log chan SLM) (*SpawnPointContainer, error)
 			AttachStdout: true,
 			AttachStderr: true,
 			AttachStdin:  true,
-            Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
-            CPUShares:    int64(cfg.CpuShares),
+			Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
+			CPUShares:    int64(cfg.CpuShares),
 		},
 		HostConfig: &docker.HostConfig{
 			NetworkMode: "host",
