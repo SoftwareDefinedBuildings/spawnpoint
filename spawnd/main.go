@@ -24,6 +24,13 @@ type Config struct {
     CpuShares   uint64
 }
 
+type SpawnPointHb struct {
+    Alias              string
+    Time               string
+    AvailableMem       uint64
+    AvailableCpuShares uint64
+}
+
 var BWC *bw2.BW2Client
 var PAC string
 var Us string
@@ -128,7 +135,18 @@ func main() {
 			handleConfig(ncfg)
 		case r := <-restart:
 			r.Dump()
-			respawn()
+            svcName := ""
+            for _, po := range r.POs {
+                if po.IsTypeDF(bw2.PODFString) {
+                    svcName = string(po.GetContents())
+                }
+            }
+
+            if svcName != "" {
+                restartService(svcName)
+            } else {
+                respawn()
+            }
 		}
 	}
 }
@@ -205,12 +223,7 @@ func heartbeat() {
         shares := availableCpuShares
         availLock.Unlock()
 
-		msg := struct {
-            Alias              string
-			Time               string
-            AvailableMem       uint64
-            AvailableCpuShares uint64
-		}{
+		msg := SpawnPointHb {
 			Cfg.Alias,
 			time.Now().Format(time.RFC3339),
             mem,
@@ -250,6 +263,20 @@ func respawn() {
 			fmt.Println("Container started ok")
 		}
 	}
+}
+
+func restartService(serviceName string) {
+    olog <- SLM{"meta", "attempting restart of service " + serviceName}
+    for name, manifest := range curconfig {
+        if name == serviceName {
+            _, err := RestartContainer(&manifest, olog)
+            if err != nil {
+                fmt.Println("ERROR IN CONTAINER: ", err)
+            } else {
+                fmt.Println("Container started ok")
+            }
+        }
+    }
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
