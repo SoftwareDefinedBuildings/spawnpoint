@@ -86,9 +86,11 @@ func main() {
 }
 
 type SpawnPoint struct {
-	URI      string
-	LastSeen time.Time
-	Alias    string
+	URI                string
+	LastSeen           time.Time
+	Alias              string
+	AvailableCpuShares uint64
+	AvailableMem       uint64
 }
 
 func (s *SpawnPoint) Good() bool {
