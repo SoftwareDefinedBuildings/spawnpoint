@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	bw2 "github.com/immesys/bw2bind"
-    yaml "gopkg.in/yaml.v2"
+	bw2 "gopkg.in/immesys/bw2bind.v1"
+	yaml "gopkg.in/yaml.v2"
 )
 
 type SpawnPointHb struct {
@@ -51,9 +51,9 @@ func FromHeartbeat(msg *bw2.SimpleMessage) (SpawnPoint, error) {
 
 func (sp *SpawnPoint) DeployService(client *bw2.BW2Client, config *SvcConfig) error {
 	rawYaml, err := yaml.Marshal(config)
-    if err != nil {
-        return err
-    }
+	if err != nil {
+		return err
+	}
 	configPo, err := bw2.LoadYAMLPayloadObject(bw2.PONumSpawnpointConfig, rawYaml)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func (sp *SpawnPoint) DeployService(client *bw2.BW2Client, config *SvcConfig) er
 
 	// Instruct spawnpoint to launch service
 	uri = sp.URI + "ctl/restart"
-    namePo := bw2.CreateStringPayloadObject(config.ServiceName)
+	namePo := bw2.CreateStringPayloadObject(config.ServiceName)
 	err = client.Publish(&bw2.PublishParams{
 		URI:            uri,
 		PayloadObjects: []bw2.PayloadObject{namePo},

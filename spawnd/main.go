@@ -12,7 +12,7 @@ import (
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
-	bw2 "github.com/immesys/bw2bind"
+	bw2 "gopkg.in/immesys/bw2bind.v1"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -310,14 +310,19 @@ func handleConfig(m *bw2.SimpleMessage) {
 	}
 	for svcname, val := range toplevel {
 		svc := val.(map[interface{}]interface{})
-
-		rawMem := svc["memAlloc"].(string)
+		rawMem, ok := svc["memAlloc"].(string)
+		if !ok {
+			panic(errors.New("bad memAlloc option"))
+		}
 		memAlloc, err := parseMemAlloc(rawMem)
 		if err != nil {
 			panic(err)
 		}
 
-		rawCpuShares := svc["cpuShares"].(string)
+		rawCpuShares, ok := svc["cpuShares"].(string)
+		if !ok {
+			panic(errors.New("bad cpuShares option"))
+		}
 		cpuShares, err := strconv.ParseUint(rawCpuShares, 0, 64)
 		if err != nil {
 			panic(err)
@@ -363,10 +368,10 @@ func handleConfig(m *bw2.SimpleMessage) {
 		availLock.Lock()
 		defer availLock.Unlock()
 		if memAlloc > availableMem {
-			err = errors.New("Insufficient Spawnpoint memory for requested allocation")
+			err = fmt.Errorf("Insufficient Spawnpoint memory for requested allocation (have %d, want %d)", availableMem, memAlloc)
 			panic(err)
 		} else if cpuShares > availableCpuShares {
-			err = errors.New("Insufficient Spawnpoint CPU shares for requested allocation")
+			err = fmt.Errorf("Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)", availableCpuShares, cpuShares)
 			panic(err)
 		} else {
 			availableMem -= memAlloc
@@ -410,24 +415,27 @@ type Manifest struct {
 	MemAlloc      uint64
 	CpuShares     uint64
 	//Automatically add the source stuff to the front of Build
-	Build         []string
-	Run           []string
-	AutoRestart   bool
-	Container     *SpawnPointContainer
+	Build       []string
+	Run         []string
+	AutoRestart bool
+	Container   *SpawnPointContainer
 }
 
 func parseMemAlloc(alloc string) (uint64, error) {
+	if alloc == "" {
+		return 0, errors.New("No memory allocation in config")
+	}
 	suffix := alloc[len(alloc)-1:]
 	memAlloc, err := strconv.ParseUint(alloc[:len(alloc)-1], 0, 64)
 	if err != nil {
-		return memAlloc, err
+		return 0, err
 	}
 
 	if suffix == "G" || suffix == "g" {
 		memAlloc *= 1024
 	} else if suffix != "M" && suffix != "m" {
 		err = errors.New("Memory allocation amount must be in units of M or G")
-		return memAlloc, err
+		return 0, err
 	}
 
 	return memAlloc, nil

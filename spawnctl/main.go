@@ -13,8 +13,8 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/codegangsta/cli"
-	bw2 "github.com/immesys/bw2bind"
 	"github.com/mgutz/ansi"
+	bw2 "gopkg.in/immesys/bw2bind.v1"
 )
 
 var BWC *bw2.BW2Client
