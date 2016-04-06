@@ -38,7 +38,7 @@ func GetParamsOrExit() *Params {
 }
 
 func (p *Params) GetEntity() (blob []byte, err error) {
-	v, ok := params["entityx"]
+	v, ok := p.dat["entityx"]
 	if !ok {
 		return nil, errors.New("Could not decode entity\n")
 	}
@@ -53,7 +53,7 @@ func (p *Params) GetEntity() (blob []byte, err error) {
 	return eblob, nil
 }
 func (p *Params) GetEntityOrExit() (blob []byte) {
-	blob, err := GetEntity(params)
+	blob, err := p.GetEntity()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Could not get entity from params: %v\n", err)
 		os.Exit(1)
