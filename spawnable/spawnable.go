@@ -8,6 +8,9 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"time"
+
+	"gopkg.in/immesys/bw2bind.v2"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -52,6 +55,96 @@ func (p *Params) GetEntity() (blob []byte, err error) {
 	}
 	return eblob, nil
 }
+
+const tsFMT = "2006-01-02T15:04:05 MST"
+
+type MetaTuple struct {
+	Val string `yaml:"val"`
+	TS  string `yaml:"ts"`
+	key string
+}
+
+func (mt *MetaTuple) NewerThan(t time.Time) bool {
+	mttime, err := time.Parse(tsFMT, mt.TS)
+	if err != nil {
+		fmt.Println("BAD METADATA TIME TAG: ", err)
+		return false
+	}
+	return mttime.After(t)
+}
+
+func (p *Params) MergeMetadata(cl *bw2bind.BW2Client) {
+	metavalidI, haveValid := p.dat["metavalid"]
+	vtime := time.Now()
+	if haveValid {
+		metavalidS := metavalidI.(string)
+		var err error
+		vtime, err = time.Parse(time.UnixDate, metavalidS)
+		if err != nil {
+			fmt.Println("Error parsing valid time:", err)
+			os.Exit(1)
+		}
+	}
+	ourtuples := []*MetaTuple{}
+	for ki, vi := range p.dat["metadata"].(map[interface{}]interface{}) {
+		k := ki.(string)
+		v := vi.(string)
+		mt := &MetaTuple{Val: v, TS: vtime.Format(tsFMT), key: k}
+		ourtuples = append(ourtuples, mt)
+	}
+
+	doTuple := func(tgt string, mt *MetaTuple) {
+		mttime, err := time.Parse(tsFMT, mt.TS)
+		if err != nil {
+			fmt.Println("Metadata tag has bad timestamp:", tgt)
+			return
+		}
+		ex_metadata, err := cl.QueryOne(&bw2bind.QueryParams{
+			URI:       tgt,
+			AutoChain: true,
+		})
+		if err != nil {
+			fmt.Println("Could not query metadata: ", err)
+			return
+		}
+		if ex_metadata != nil {
+			entry, ok := ex_metadata.GetOnePODF(bw2bind.PODFSMetadata).(bw2bind.MsgPackPayloadObject)
+			if ok {
+				obj := bw2bind.MetadataTuple{}
+				entry.ValueInto(&obj)
+				if !mt.NewerThan(obj.Time()) {
+					fmt.Println("Existing metadata is same/newer for: ", tgt)
+					return
+				}
+			}
+		}
+		po, err := bw2bind.CreateMsgPackPayloadObject(bw2bind.PONumSMetadata, &bw2bind.MetadataTuple{
+			Value:     mt.Val,
+			Timestamp: mttime.UnixNano(),
+		})
+		if err != nil {
+			fmt.Println("Could not create PO: ", err)
+		}
+
+		err = cl.Publish(&bw2bind.PublishParams{
+			URI:            tgt,
+			PayloadObjects: []bw2bind.PayloadObject{po},
+			Persist:        true,
+			AutoChain:      true,
+		})
+		if err != nil {
+			fmt.Println("Unable to update metadata: ", err)
+		} else {
+			fmt.Printf("set %s to %v @(%s)\n", tgt, mt.Val, mt.TS)
+		}
+	}
+
+	for _, mt := range ourtuples {
+		tgt := p.MustString("svc_base_uri") + "!meta/" + mt.key
+		doTuple(tgt, mt)
+	}
+}
+
 func (p *Params) GetEntityOrExit() (blob []byte) {
 	blob, err := p.GetEntity()
 	if err != nil {
@@ -95,7 +188,7 @@ func DoHttpPutStr(uri, content string, headers []string) string {
 		fmt.Println("Odd number of headers")
 		return ""
 	}
-	for i := 0; i < len(headers)/2; i += 2 {
+	for i := 0; i < len(headers); i += 2 {
 		req.Header.Add(headers[i], headers[i+1])
 	}
 	resp, err := client.Do(req)
