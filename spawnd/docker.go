@@ -95,10 +95,10 @@ func StopContainer(serviceName string, remove bool) error {
 	return nil
 }
 
-func RestartContainer(cfg *Manifest, fetchNewImage bool) (*SpawnPointContainer, error) {
+func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, error) {
 	// First remove previous container
 	fmt.Println("Restarting container for svc", cfg.ServiceName)
-	err := StopContainer(cfg.ServiceName, fetchNewImage)
+	err := StopContainer(cfg.ServiceName, rebuildImage)
 	if err != nil {
 		fmt.Println("Failed to remove container for svc", cfg.ServiceName)
 		return nil, err
@@ -106,7 +106,7 @@ func RestartContainer(cfg *Manifest, fetchNewImage bool) (*SpawnPointContainer, 
 
 	// Then rebuild image if necessary
 	imgname := "spawnpoint_image_" + cfg.ServiceName
-	if fetchNewImage {
+	if rebuildImage {
 		err = DKR.RemoveImage(imgname)
 		if err != nil && err != docker.ErrNoSuchImage {
 			fmt.Println("Failed to remove image for svc", cfg.ServiceName)
