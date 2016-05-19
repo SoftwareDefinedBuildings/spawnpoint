@@ -1,5 +1,5 @@
-entity: example.key
+entity: jack.key
 path: castle.bw2.io/soda/410/test0
 alias: foobuzz
-totalMem: 2G
-totalCpuShares: 2048
+memAlloc: 2G
+cpuShares: 2048

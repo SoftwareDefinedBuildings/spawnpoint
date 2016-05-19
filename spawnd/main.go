@@ -20,7 +20,7 @@ import (
 
 var bwClient *bw2.BW2Client
 var PrimaryAccessChain string
-var Cfg DaemonConfig
+var Cfg *DaemonConfig
 var olog chan SLM
 
 var (
@@ -41,8 +41,8 @@ var eventCh chan *docker.APIEvents
 const HEARTBEAT_PERIOD = 5
 
 type SLM struct {
-    Service string
-    Message string
+	Service string
+	Message string
 }
 
 func readConfigFromFile(fileName string) (*DaemonConfig, error) {
@@ -84,26 +84,25 @@ func initializeBosswave() (*bw2.BW2Client, string, error) {
 }
 
 func main() {
-	Cfg, err := readConfigFromFile("config.yml")
+	var err error
+	Cfg, err = readConfigFromFile("config.yml")
 	if err != nil {
 		fmt.Println("Config file error:", err)
 		os.Exit(1)
 	}
 
-	totalCpuShares = Cfg.CpuShares
-	availableCpuShares = totalCpuShares
+	availableCpuShares = Cfg.CpuShares
 	rawMem := Cfg.MemAlloc
 	memAlloc, err := parseMemAlloc(rawMem)
 	if err != nil {
 		fmt.Println("Invalid Spawnpoint memory allocation:", err)
 		os.Exit(1)
 	}
-	totalMem = memAlloc
-	availableMem = totalMem
+	availableMem = memAlloc
 
 	bwClient, PrimaryAccessChain, err = initializeBosswave()
 	if err != nil {
-		fmt.Println("Failed to connect to Bosswave router and establish permissions")
+		fmt.Println("Failed to connect to Bosswave router and establish permissions:", err)
 		os.Exit(1)
 	} else {
 		fmt.Println("Connected to router and obtained permissions")
@@ -398,7 +397,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	runningServices[config.ServiceName] = mf
 	runningSvcsLock.Unlock()
 
-    // Automatically start the new service. This may change in the future...
+	// Automatically start the new service. This may change in the future...
 	restartService(config.ServiceName, true)
 }
 
