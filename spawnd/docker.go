@@ -19,7 +19,8 @@ type SpawnPointContainer struct {
 }
 
 func ConnectDocker() (chan *docker.APIEvents, error) {
-	DKR, err := docker.NewClient("unix:///var/run/docker.sock")
+	var err error
+	DKR, err = docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +174,7 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 	}
 
 	// Attach
-	DKR.AttachToContainer(docker.AttachToContainerOptions{
+	go DKR.AttachToContainer(docker.AttachToContainerOptions{
 		Container:    cnt.ID,
 		OutputStream: os.Stdout,
 		ErrorStream:  os.Stderr,

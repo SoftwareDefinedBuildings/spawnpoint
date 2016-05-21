@@ -1,7 +1,7 @@
 {{$base := "castle.bw2.io/soda/410"}}
-foobuzz:
+omo:
   demosvc:
-    entity: demokey.key
+    entity: /home/jack/bosswave/jack.key
     container: immesys/spawnpoint:amd64
     aptrequires: python3
     source: git+http://github.com/immesys/demosvc
@@ -11,3 +11,5 @@ foobuzz:
     params:
       message: "hello world"
       to: {{$base}}/funtimes/info/dsvc/out
+    memAlloc: 512M
+    cpuShares: 1024

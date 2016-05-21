@@ -32,7 +32,7 @@ var (
 )
 
 var (
-	runningServices map[string]Manifest
+	runningServices map[string]*Manifest
 	runningSvcsLock sync.Mutex
 )
 
@@ -84,6 +84,9 @@ func initializeBosswave() (*bw2.BW2Client, string, error) {
 }
 
 func main() {
+	runningServices = make(map[string]*Manifest)
+	runningSvcsLock = sync.Mutex{}
+
 	var err error
 	Cfg, err = readConfigFromFile("config.yml")
 	if err != nil {
@@ -249,6 +252,7 @@ func heartbeat() {
 		shares := availableCpuShares
 		availLock.Unlock()
 
+		fmt.Fprintf(os.Stderr, "shares: %v, mem: %v\n", shares, mem)
 		msg := objects.SpawnPointHb{
 			Cfg.Alias,
 			time.Now().Format(time.RFC3339),
@@ -283,7 +287,7 @@ func respawn() {
 	olog <- SLM{"meta", "doing respawn"}
 	runningSvcsLock.Lock()
 	for _, manifest := range runningServices {
-		cnt, err := RestartContainer(&manifest, true)
+		cnt, err := RestartContainer(manifest, true)
 		if err != nil {
 			fmt.Println("ERROR IN CONTAINER: ", err)
 		} else {
@@ -299,7 +303,7 @@ func restartService(serviceName string, rebuildImage bool) {
 	runningSvcsLock.Lock()
 	for name, manifest := range runningServices {
 		if name == serviceName {
-			cnt, err := RestartContainer(&manifest, rebuildImage)
+			cnt, err := RestartContainer(manifest, rebuildImage)
 			if err != nil {
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
@@ -332,19 +336,13 @@ func stopService(serviceName string) {
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
-	defer func() {
-		r := recover()
-		if r != nil {
-			olog <- SLM{Service: "meta", Message: "Error initializing service: " + fmt.Sprintf("%+v", r)}
-		}
-	}()
 
 	cfgPo, ok := m.GetOnePODF(bw2.PODFSpawnpointConfig).(bw2.YAMLPayloadObject)
 	if !ok {
 		return
 	}
 
-	config := objects.SvcConfig{}
+	config := &objects.SvcConfig{}
 	err := cfgPo.ValueInto(config)
 	if err != nil {
 		panic(err)
@@ -394,7 +392,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	}
 
 	runningSvcsLock.Lock()
-	runningServices[config.ServiceName] = mf
+	runningServices[config.ServiceName] = &mf
 	runningSvcsLock.Unlock()
 
 	// Automatically start the new service. This may change in the future...
@@ -421,7 +419,7 @@ func parseMemAlloc(alloc string) (uint64, error) {
 	return memAlloc, nil
 }
 
-func constructBuildContents(config objects.SvcConfig) ([]string, error) {
+func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 	rawbuildcontents := strings.Split(config.Build, "\n")
 	buildcontents := make([]string, len(rawbuildcontents)+5)
 	sourceparts := strings.SplitN(config.Source, "+", 2)
@@ -433,7 +431,12 @@ func constructBuildContents(config objects.SvcConfig) ([]string, error) {
 		return nil, err
 	}
 
-	parms64 := base64.StdEncoding.EncodeToString([]byte(config.Params))
+	parmsString := ""
+	for k, v := range config.Params {
+		parmsString += k + ": " + v + "\n"
+	}
+	parms64 := base64.StdEncoding.EncodeToString([]byte(parmsString))
+
 	buildcontents[1] = "WORKDIR /srv/target"
 	buildcontents[2] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
 	if config.AptRequires != "" {
@@ -454,11 +457,12 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 		if event.Action == "die" {
 			runningSvcsLock.Lock()
 			for name, manifest := range runningServices {
-				if manifest.Container.Raw.ID == event.Actor.ID {
+				// Container can be nil when service is registered but not yet started
+				if manifest.Container != nil && manifest.Container.Raw.ID == event.Actor.ID {
 					olog <- SLM{name, "Container stopped"}
 
 					if manifest.AutoRestart {
-						cnt, err := RestartContainer(&manifest, false)
+						cnt, err := RestartContainer(manifest, false)
 						if err != nil {
 							fmt.Println("ERROR IN CONTAINER: ", err)
 							delete(runningServices, name)
@@ -475,6 +479,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 						availLock.Lock()
 						availableCpuShares += manifest.CpuShares
 						availableMem += manifest.MemAlloc
+						availLock.Unlock()
 					}
 				}
 			}

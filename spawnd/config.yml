@@ -1,5 +1,5 @@
 entity: jack.key
-path: castle.bw2.io/soda/410/test0
-alias: foobuzz
+path: castle.bw2.io/foo/spawnpoint/alpha
+alias: omo
 memAlloc: 2G
 cpuShares: 2048

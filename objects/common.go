@@ -12,17 +12,17 @@ type SpawnPointHb struct {
 }
 
 type SvcConfig struct {
-	ServiceName string   `yaml:"serviceName"`
-	Entity      string   `yaml:"entity"`
-	Container   string   `yaml:"container"`
-	Build       string   `yaml:"build"`
-	Source      string   `yaml:"source"`
-	AptRequires string   `yaml:"aptRequires, omitempty"`
-	Params      string   `yaml:"params"`
-	Run         []string `yaml:"run, omitempty"`
-	MemAlloc    string   `yaml:"memAlloc"`
-	CpuShares   uint64   `yaml:"cpuShares"`
-	AutoRestart bool     `yaml:"autoRestart"`
+	ServiceName string            `yaml:"serviceName"`
+	Entity      string            `yaml:"entity"`
+	Container   string            `yaml:"container"`
+	Build       string            `yaml:"build"`
+	Source      string            `yaml:"source"`
+	AptRequires string            `yaml:"aptRequires,omitempty"`
+	Params      map[string]string `yaml:"params"`
+	Run         []string          `yaml:"run,omitempty"`
+	MemAlloc    string            `yaml:"memAlloc"`
+	CpuShares   uint64            `yaml:"cpuShares"`
+	AutoRestart bool              `yaml:"autoRestart"`
 }
 
 type SpawnPoint struct {
@@ -38,8 +38,8 @@ func (sp *SpawnPoint) Good() bool {
 }
 
 type SPLog struct {
-    Time int64
-    SPAlias string
-    Service string
-    Contents string
+	Time     int64
+	SPAlias  string
+	Service  string
+	Contents string
 }
