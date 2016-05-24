@@ -1,7 +1,7 @@
 {{$base := "castle.bw2.io/soda/410"}}
 omo:
   demosvc:
-    entity: /home/jack/bosswave/jack.key
+    entity: /home/jack/bosswave/keys/spawnpointTest.key
     container: immesys/spawnpoint:amd64
     aptrequires: python3
     source: git+http://github.com/immesys/demosvc

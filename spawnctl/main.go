@@ -16,23 +16,24 @@ import (
 
 	"github.com/codegangsta/cli"
 	"github.com/mgutz/ansi"
-	bw2 "gopkg.in/immesys/bw2bind.v1"
+	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
 
-func InitCon(c *cli.Context) (*bw2.BW2Client, string) {
+func InitCon(c *cli.Context) *bw2.BW2Client {
 	BWC, err := bw2.Connect(c.GlobalString("router"))
 	if err != nil {
 		fmt.Println("Could not connect to router: ", err)
 		os.Exit(1)
 	}
 
-	Us, err := BWC.SetEntityFile(c.GlobalString("entity"))
+	_, err = BWC.SetEntityFile(c.GlobalString("entity"))
 	if err != nil {
 		fmt.Println("Could not set entity: ", err)
 		os.Exit(1)
 	}
 
-	return BWC, Us
+	BWC.OverrideAutoChainTo(true)
+	return BWC
 }
 
 func main() {
@@ -100,13 +101,9 @@ func main() {
 	app.Run(os.Args)
 }
 
-func scan(baseuri string, BWC *bw2.BW2Client, PAC string) map[string]objects.SpawnPoint {
+func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 	scanuri := baseuri + "/info/spawn/!heartbeat"
-	res, err := BWC.Query(&bw2.QueryParams{
-		URI:                scanuri,
-		PrimaryAccessChain: PAC,
-		ElaboratePAC:       bw2.ElaborateFull,
-	})
+	res, err := BWC.Query(&bw2.QueryParams{URI: scanuri})
 	if err != nil {
 		fmt.Println("Unable to do query: ", err)
 		os.Exit(1)
@@ -144,7 +141,7 @@ func scan(baseuri string, BWC *bw2.BW2Client, PAC string) map[string]objects.Spa
 }
 
 func actionScan(c *cli.Context) {
-	BWClient, Us := InitCon(c)
+	BWClient := InitCon(c)
 
 	baseuri := fixuri(c.String("uri"))
 	if len(baseuri) == 0 {
@@ -158,14 +155,7 @@ func actionScan(c *cli.Context) {
 		baseuri += "/*"
 	}
 
-	ch, err := BWClient.BuildAnyChain(baseuri, "C*", Us)
-	if err != nil {
-		fmt.Println("Could not obtain permissions: ", err)
-		os.Exit(1)
-	}
-	PAC := ch.Hash
-
-	spawnPoints := scan(baseuri, BWClient, PAC)
+	spawnPoints := scan(baseuri, BWClient)
 	fmt.Println("Discovered SpawnPoints:")
 	for _, sp := range spawnPoints {
 		var color string
@@ -220,7 +210,7 @@ func fixuri(u string) string {
 }
 
 func actionDeploy(c *cli.Context) {
-	BWClient, Us := InitCon(c)
+	BWClient := InitCon(c)
 
 	baseuri := fixuri(c.String("uri"))
 	if len(baseuri) == 0 {
@@ -240,14 +230,7 @@ func actionDeploy(c *cli.Context) {
 		os.Exit(1)
 	}
 
-	ch, err := BWClient.BuildAnyChain(baseuri, "C*", Us)
-	if err != nil {
-		fmt.Println("Could not obtain permissions: ", err)
-		os.Exit(1)
-	}
-	PAC := ch.Hash
-
-	spawnpoints := scan(baseuri, BWClient, PAC)
+	spawnpoints := scan(baseuri, BWClient)
 	logs := make([]chan *bw2.SimpleMessage, 0)
 
 	spDeployments := parseConfig(cfg)
@@ -282,21 +265,15 @@ func actionDeploy(c *cli.Context) {
 			uri := sp.URI + "ctl/cfg"
 			fmt.Println("publishing cfg to: ", uri)
 			err = BWClient.Publish(&bw2.PublishParams{
-				URI:                uri,
-				PrimaryAccessChain: PAC,
-				ElaboratePAC:       bw2.ElaborateFull,
-				PayloadObjects:     []bw2.PayloadObject{po},
+				URI:            uri,
+				PayloadObjects: []bw2.PayloadObject{po},
 			})
 			if err != nil {
 				fmt.Println("ERROR publishing: ", err)
 				continue
 			}
 
-			log, err := BWClient.Subscribe(&bw2.SubscribeParams{
-				URI:                sp.URI + "info/spawn/" + config.ServiceName + "/log",
-				PrimaryAccessChain: PAC,
-				ElaboratePAC:       bw2.ElaborateFull,
-			})
+			log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: sp.URI + "info/spawn/" + config.ServiceName + "/log"})
 			if err != nil {
 				fmt.Println("ERROR subscribing to log:", err)
 			} else {
@@ -315,7 +292,7 @@ func actionDeploy(c *cli.Context) {
 
 	for {
 		_, msgVal, _ := reflect.Select(cases)
-		// Ugh, I probably have no idea what I'm doing
+		// I may have no idea what I'm doing
 		msg := msgVal.Interface().(*bw2.SimpleMessage)
 
 		for _, po := range msg.POs {
@@ -346,19 +323,9 @@ func actionMonitor(c *cli.Context) {
 	}
 	uri := baseuri + "/info/spawn/+/log"
 
-	BWClient, us := InitCon(c)
-	ch, err := BWClient.BuildAnyChain(baseuri, "C*", us)
-	if err != nil {
-		fmt.Println("Could not obtain permissions: ", err)
-		os.Exit(1)
-	}
-	PAC := ch.Hash
+	BWClient := InitCon(c)
 
-	log, err := BWClient.Subscribe(&bw2.SubscribeParams{
-		URI:                uri,
-		PrimaryAccessChain: PAC,
-		ElaboratePAC:       bw2.ElaborateFull,
-	})
+	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
 	if err != nil {
 		fmt.Println("Could not subscribe to log URI:", uri)
 		os.Exit(1)

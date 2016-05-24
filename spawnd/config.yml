@@ -1,5 +1,5 @@
-entity: jack.key
-path: castle.bw2.io/foo/spawnpoint/alpha
+entity: /home/jack/bosswave/keys/spawnpointTest.key
+path: jkolb/spawnpoint/alpha
 alias: omo
 memAlloc: 2G
 cpuShares: 2048

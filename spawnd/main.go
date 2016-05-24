@@ -14,7 +14,7 @@ import (
 	"github.com/immesys/spawnpoint/objects"
 
 	docker "github.com/fsouza/go-dockerclient"
-	bw2 "gopkg.in/immesys/bw2bind.v1"
+	bw2 "gopkg.in/immesys/bw2bind.v5"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -60,27 +60,23 @@ func readConfigFromFile(fileName string) (*DaemonConfig, error) {
 	}
 }
 
-func initializeBosswave() (*bw2.BW2Client, string, error) {
+func initializeBosswave() (*bw2.BW2Client, error) {
 	if Cfg.LocalRouter == "" {
 		Cfg.LocalRouter = "127.0.0.1:28589"
 	}
 
 	client, err := bw2.Connect(Cfg.LocalRouter)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	us, err := client.SetEntityFile(Cfg.Entity)
+	_, err = client.SetEntityFile(Cfg.Entity)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
-	pac, err := client.BuildAnyChain(path("*"), "PC", us)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return client, pac.Hash, nil
+	client.OverrideAutoChainTo(true)
+	return client, nil
 }
 
 func main() {
@@ -103,12 +99,12 @@ func main() {
 	}
 	availableMem = memAlloc
 
-	bwClient, PrimaryAccessChain, err = initializeBosswave()
+	bwClient, err = initializeBosswave()
 	if err != nil {
 		fmt.Println("Failed to connect to Bosswave router and establish permissions:", err)
 		os.Exit(1)
 	} else {
-		fmt.Println("Connected to router and obtained permissions")
+		fmt.Println("Successfully connected to router")
 	}
 
 	// Start docker connection
@@ -119,31 +115,19 @@ func main() {
 	}
 	go monitorDockerEvents(&eventCh)
 
-	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{
-		URI:                path("ctl/cfg"),
-		PrimaryAccessChain: PrimaryAccessChain,
-		ElaboratePAC:       bw2.ElaborateFull,
-	})
+	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/cfg")})
 	if err != nil {
 		fmt.Println("Could not subscribe to config URI: ", err)
 		os.Exit(1)
 	}
 
-	restart, err := bwClient.Subscribe(&bw2.SubscribeParams{
-		URI:                path("ctl/restart"),
-		PrimaryAccessChain: PrimaryAccessChain,
-		ElaboratePAC:       bw2.ElaborateFull,
-	})
+	restart, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/restart")})
 	if err != nil {
 		fmt.Println("Could not subscribe to restart URI: ", err)
 		os.Exit(1)
 	}
 
-	stop, err := bwClient.Subscribe(&bw2.SubscribeParams{
-		URI:                path("ctl/stop"),
-		PrimaryAccessChain: PrimaryAccessChain,
-		ElaboratePAC:       bw2.ElaborateFull,
-	})
+	stop, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/stop")})
 	if err != nil {
 		fmt.Println("Could not subscribe to stop URI: ", err)
 		os.Exit(1)
@@ -190,11 +174,9 @@ func main() {
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
 	err := bwClient.Publish(&bw2.PublishParams{
-		URI:                path("info/spawn/" + svcname + "/log"),
-		PrimaryAccessChain: PrimaryAccessChain,
-		ElaboratePAC:       bw2.ElaborateFull,
-		Persist:            true,
-		PayloadObjects:     POs,
+		URI: path("info/spawn/" + svcname + "/log"),
+		//Persist:            true,
+		PayloadObjects: POs,
 	})
 	if err != nil {
 		fmt.Println("Error publishing log: ", err)

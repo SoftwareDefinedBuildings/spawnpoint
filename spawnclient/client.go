@@ -6,13 +6,16 @@ import (
 
 	"github.com/immesys/spawnpoint/objects"
 
-	bw2 "gopkg.in/immesys/bw2bind.v1"
+	bw2 "gopkg.in/immesys/bw2bind.v5"
 	yaml "gopkg.in/yaml.v2"
 )
 
 type SpawnClient struct {
 	bwClient *bw2.BW2Client
-	pac      string
+}
+
+func NewSpawnClient(bwClient *bw2.BW2Client) *SpawnClient {
+    return &SpawnClient { bwClient: bwClient }
 }
 
 func FromHeartbeat(msg *bw2.SimpleMessage) (*objects.SpawnPoint, error) {
@@ -51,8 +54,6 @@ func (client *SpawnClient) DeployService(spawnPoint *objects.SpawnPoint, config 
 	err = client.bwClient.Publish(&bw2.PublishParams{
 		URI:                uri,
 		PayloadObjects:     []bw2.PayloadObject{configPo},
-		PrimaryAccessChain: client.pac,
-		ElaboratePAC:       bw2.ElaborateFull,
 	})
 	if err != nil {
 		return err
@@ -65,8 +66,6 @@ func (client *SpawnClient) DeployService(spawnPoint *objects.SpawnPoint, config 
 	return client.bwClient.Publish(&bw2.PublishParams{
 		URI:                uri,
 		PayloadObjects:     []bw2.PayloadObject{namePo},
-		PrimaryAccessChain: client.pac,
-		ElaboratePAC:       bw2.ElaborateFull,
 	})
 }
 
@@ -77,8 +76,6 @@ func (client *SpawnClient) RestartService(spawnPoint *objects.SpawnPoint, svcNam
 	return client.bwClient.Publish(&bw2.PublishParams{
 		URI:                uri,
 		PayloadObjects:     []bw2.PayloadObject{po},
-		PrimaryAccessChain: client.pac,
-		ElaboratePAC:       bw2.ElaborateFull,
 	})
 }
 
@@ -89,7 +86,5 @@ func (client *SpawnClient) StopService(spawnPoint *objects.SpawnPoint, svcName s
 	return client.bwClient.Publish(&bw2.PublishParams{
 		URI:                uri,
 		PayloadObjects:     []bw2.PayloadObject{po},
-		PrimaryAccessChain: client.pac,
-		ElaboratePAC:       bw2.ElaborateFull,
 	})
 }
