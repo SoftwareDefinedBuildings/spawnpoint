@@ -3,7 +3,7 @@ omo:
   demosvc:
     entity: /home/jack/bosswave/keys/spawnpointTest.key
     container: immesys/spawnpoint:amd64
-    aptrequires: python3
+    aptRequires: python3
     source: git+http://github.com/immesys/demosvc
     build:
       go build -o demosvc

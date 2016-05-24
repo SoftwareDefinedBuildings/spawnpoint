@@ -165,8 +165,8 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 
 	err = DKR.StartContainer(cnt.ID, &docker.HostConfig{
 		NetworkMode: "host",
-        Memory:      int64(cfg.MemAlloc) * 1024 * 1024,
-        CPUShares:   int64(cfg.CpuShares),
+		Memory:      int64(cfg.MemAlloc) * 1024 * 1024,
+		CPUShares:   int64(cfg.CpuShares),
 	})
 	if err != nil {
 		fmt.Println("Failed to start container for svc", cfg.ServiceName)

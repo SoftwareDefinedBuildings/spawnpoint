@@ -49,9 +49,10 @@ func main() {
 			Value: "127.0.0.1:28589",
 		},
 		cli.StringFlag{
-			Name:  "entity, e",
-			Usage: "set the entity keyfile",
-			Value: "entity.key",
+			Name:   "entity, e",
+			Usage:  "set the entity keyfile",
+			Value:  "entity.key",
+			EnvVar: "BW2_DEFAULT_ENTITY",
 		},
 	}
 
@@ -193,7 +194,6 @@ func parseConfig(filename string) *map[string](map[string]objects.SvcConfig) {
 
 	rv := make(map[string](map[string]objects.SvcConfig))
 	err = yaml.Unmarshal(buf.Bytes(), &rv)
-	fmt.Fprintf(os.Stderr, "%+v\n", rv)
 	if err != nil {
 		fmt.Println("Config syntax error: ", err)
 		os.Exit(1)
@@ -262,6 +262,13 @@ func actionDeploy(c *cli.Context) {
 				os.Exit(1)
 			}
 
+			log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: sp.URI + "info/spawn/" + svcName + "/log"})
+			if err != nil {
+				fmt.Println("ERROR subscribing to log:", err)
+			} else {
+				logs = append(logs, log)
+			}
+
 			uri := sp.URI + "ctl/cfg"
 			fmt.Println("publishing cfg to: ", uri)
 			err = BWClient.Publish(&bw2.PublishParams{
@@ -271,13 +278,6 @@ func actionDeploy(c *cli.Context) {
 			if err != nil {
 				fmt.Println("ERROR publishing: ", err)
 				continue
-			}
-
-			log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: sp.URI + "info/spawn/" + config.ServiceName + "/log"})
-			if err != nil {
-				fmt.Println("ERROR subscribing to log:", err)
-			} else {
-				logs = append(logs, log)
 			}
 		}
 	}
@@ -327,7 +327,7 @@ func actionMonitor(c *cli.Context) {
 
 	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
 	if err != nil {
-		fmt.Println("Could not subscribe to log URI:", uri)
+		fmt.Println("Could not subscribe to log URI:", err)
 		os.Exit(1)
 	}
 

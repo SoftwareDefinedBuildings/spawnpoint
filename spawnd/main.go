@@ -174,8 +174,7 @@ func main() {
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
 	err := bwClient.Publish(&bw2.PublishParams{
-		URI: path("info/spawn/" + svcname + "/log"),
-		//Persist:            true,
+		URI:            path("info/spawn/" + svcname + "/log"),
 		PayloadObjects: POs,
 	})
 	if err != nil {
@@ -287,8 +286,10 @@ func restartService(serviceName string, rebuildImage bool) {
 		if name == serviceName {
 			cnt, err := RestartContainer(manifest, rebuildImage)
 			if err != nil {
+                olog <- SLM{serviceName, "restart failed"}
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
+                olog <- SLM{serviceName, "restart successful!"}
 				fmt.Println("Container started ok")
 				manifest.Container = cnt
 			}
@@ -308,8 +309,10 @@ func stopService(serviceName string) {
 			// Updating available mem and cpu shares done by event monitor
 			err := StopContainer(manifest.ServiceName, false)
 			if err != nil {
+                olog <- SLM{serviceName, "failed to stop container"}
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
+                olog <- SLM{serviceName, "container stopped"}
 				fmt.Println("Container stopped successfully")
 			}
 		}
@@ -318,13 +321,27 @@ func stopService(serviceName string) {
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
+    var config *objects.SvcConfig
+
+	defer func() {
+		r := recover()
+		if r != nil {
+            var tag string
+            if config != nil {
+                tag = config.ServiceName
+            } else {
+                tag = "meta"
+            }
+			olog <- SLM{Service: tag, Message: fmt.Sprintf("Failed to launch service: %+v", r)}
+		}
+	}()
 
 	cfgPo, ok := m.GetOnePODF(bw2.PODFSpawnpointConfig).(bw2.YAMLPayloadObject)
 	if !ok {
 		return
 	}
 
-	config := &objects.SvcConfig{}
+	config = &objects.SvcConfig{}
 	err := cfgPo.ValueInto(config)
 	if err != nil {
 		panic(err)
@@ -446,6 +463,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 					if manifest.AutoRestart {
 						cnt, err := RestartContainer(manifest, false)
 						if err != nil {
+                            olog <- SLM{name, "Auto restart failed"}
 							fmt.Println("ERROR IN CONTAINER: ", err)
 							delete(runningServices, name)
 							availLock.Lock()
@@ -453,6 +471,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 							availableMem += manifest.MemAlloc
 							availLock.Unlock()
 						} else {
+                            olog <- SLM{name, "Auto restart successful!"}
 							fmt.Println("Container restart ok")
 							manifest.Container = cnt
 						}
