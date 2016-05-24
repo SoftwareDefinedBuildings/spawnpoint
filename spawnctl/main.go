@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/immesys/spawnpoint/objects"
+	"github.com/immesys/spawnpoint/uris"
 	"gopkg.in/yaml.v2"
 
 	"github.com/codegangsta/cli"
@@ -103,7 +105,7 @@ func main() {
 }
 
 func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
-	scanuri := baseuri + "/info/spawn/!heartbeat"
+	scanuri := uris.SignalPath(baseuri, "heartbeat")
 	res, err := BWC.Query(&bw2.QueryParams{URI: scanuri})
 	if err != nil {
 		fmt.Println("Unable to do query: ", err)
@@ -115,16 +117,14 @@ func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 		for _, po := range r.POs {
 			if po.IsTypeDF(bw2.PODFSpawnpointHeartbeat) {
 				hb := objects.SpawnPointHb{}
-				po.(bw2.YAMLPayloadObject).ValueInto(&hb)
+				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
+				if err != nil {
+					fmt.Println("Received malformed heartbeat:", err)
+				}
 
 				uri := r.URI
-				uri = uri[:len(uri)-len("info/spawn/!heartbeat")]
-				ls, err := time.Parse(time.RFC3339, hb.Time)
-				if err != nil {
-					fmt.Println("WARN: bad time in heartbeat from", uri)
-					fmt.Println("value: ", hb.Time, "Error: ", err)
-					continue
-				}
+				uri = uri[:len(uri)-len("s.spawnpoint/server/i.spawnpoint/signal/heartbeat")]
+				ls := time.Unix(0, hb.Time)
 
 				v := objects.SpawnPoint{
 					URI:                uri,
@@ -141,19 +141,20 @@ func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 	return rv
 }
 
-func actionScan(c *cli.Context) {
+func actionScan(c *cli.Context) error {
 	BWClient := InitCon(c)
 
 	baseuri := fixuri(c.String("uri"))
 	if len(baseuri) == 0 {
-		fmt.Println("Missing URI parameter")
-		os.Exit(1)
+		msg := "Missing URI parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	if strings.HasSuffix(baseuri, "/") {
-		baseuri += "*"
-	} else if !strings.HasSuffix(baseuri, "/*") {
-		baseuri += "/*"
+		baseuri += "+"
+	} else if !strings.HasSuffix(baseuri, "/+") {
+		baseuri += "/+"
 	}
 
 	spawnPoints := scan(baseuri, BWClient)
@@ -170,6 +171,8 @@ func actionScan(c *cli.Context) {
 		fmt.Printf("[%s%s%s] seen %s%s%s ago at %s\n", ansi.ColorCode("blue+b"), sp.Alias,
 			ansi.ColorCode("reset"), color, ls, ansi.ColorCode("reset"), sp.URI)
 	}
+
+	return nil
 }
 
 func recParse(t *template.Template, filename string) *template.Template {
@@ -209,13 +212,14 @@ func fixuri(u string) string {
 	return u
 }
 
-func actionDeploy(c *cli.Context) {
+func actionDeploy(c *cli.Context) error {
 	BWClient := InitCon(c)
 
 	baseuri := fixuri(c.String("uri"))
 	if len(baseuri) == 0 {
-		fmt.Println("Missing 'uri' parameter")
-		os.Exit(1)
+		msg := "Missing 'uri' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	if strings.HasSuffix(baseuri, "/") {
@@ -226,8 +230,9 @@ func actionDeploy(c *cli.Context) {
 
 	cfg := c.String("config")
 	if len(cfg) == 0 {
-		fmt.Println("Missing 'config' parameter")
-		os.Exit(1)
+		msg := "Missing 'config' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	spawnpoints := scan(baseuri, BWClient)
@@ -239,9 +244,9 @@ func actionDeploy(c *cli.Context) {
 			config.ServiceName = svcName
 			entityContents, err := ioutil.ReadFile(config.Entity)
 			if err != nil {
-				fmt.Printf("%s[ERR] cannot find entity keyfile '%s'. Aborting.%s\n",
-					ansi.ColorCode("red+b"), config.Entity, ansi.ColorCode("reset"))
-				os.Exit(1)
+				msg := fmt.Sprintf("Cannot find entity keyfile '%s'. Aborting", config.Entity)
+				fmt.Println(msg)
+				return errors.New(msg)
 			}
 			config.Entity = base64.StdEncoding.EncodeToString(entityContents)
 
@@ -258,26 +263,30 @@ func actionDeploy(c *cli.Context) {
 
 			po, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
 			if err != nil {
-				fmt.Println("Failed to serialize config for spawnpoint", spName)
-				os.Exit(1)
+				msg := "Failed to serialize config for spawnpoint" + spName
+				fmt.Println(msg)
+				return errors.New(msg)
 			}
 
-			log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: sp.URI + "info/spawn/" + svcName + "/log"})
+			log, err := BWClient.Subscribe(&bw2.SubscribeParams{
+				URI: uris.ServiceSignalPath(sp.URI, svcName, "log"),
+			})
 			if err != nil {
 				fmt.Println("ERROR subscribing to log:", err)
 			} else {
 				logs = append(logs, log)
 			}
 
-			uri := sp.URI + "ctl/cfg"
+			uri := uris.SlotPath(sp.URI, "config")
 			fmt.Println("publishing cfg to: ", uri)
 			err = BWClient.Publish(&bw2.PublishParams{
 				URI:            uri,
 				PayloadObjects: []bw2.PayloadObject{po},
 			})
 			if err != nil {
-				fmt.Println("ERROR publishing: ", err)
-				continue
+				msg := fmt.Sprintf("Failed to publish config: %v", err)
+				fmt.Println(msg)
+				return errors.New(msg)
 			}
 		}
 	}
@@ -313,22 +322,26 @@ func actionDeploy(c *cli.Context) {
 			}
 		}
 	}
+
+	return nil
 }
 
-func actionMonitor(c *cli.Context) {
+func actionMonitor(c *cli.Context) error {
 	baseuri := fixuri(c.String("uri"))
 	if baseuri == "" {
 		fmt.Println("Missing 'uri' parameter")
 		os.Exit(1)
 	}
-	uri := baseuri + "/info/spawn/+/log"
+
+	uri := uris.ServiceSignalPath(baseuri, "+", "log")
 
 	BWClient := InitCon(c)
 
 	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
 	if err != nil {
-		fmt.Println("Could not subscribe to log URI:", err)
-		os.Exit(1)
+		msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
@@ -352,4 +365,6 @@ func actionMonitor(c *cli.Context) {
 			}
 		}
 	}
+
+	return nil
 }

@@ -1,15 +1,15 @@
-{{$base := "castle.bw2.io/soda/410"}}
-omo:
+{{$base := "jkolb/demo"}}
+alpha:
   demosvc:
-    entity: /home/jack/bosswave/keys/spawnpointTest.key
+    entity: ~/bosswave/keys/spawnpointTest.key
     container: immesys/spawnpoint:amd64
-    aptRequires: python3
-    source: git+http://github.com/immesys/demosvc
+    source: git+http://github.com/jkolb1/demosvc
     build:
+      go get
       go build -o demosvc
-    run: [demosvc, "hello world"]
+    run: [demosvc, 100]
     params:
-      message: "hello world"
-      to: {{$base}}/funtimes/info/dsvc/out
+      message: "Hello, World"
+      to: {{$base}}/out
     memAlloc: 512M
     cpuShares: 1024

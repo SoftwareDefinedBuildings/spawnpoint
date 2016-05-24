@@ -6,7 +6,9 @@ import (
 
 type SpawnPointHb struct {
 	Alias              string `yaml:"alias"`
-	Time               string `yaml:"time"`
+	Time               int64  `yaml:"time"`
+	TotalMem           uint64 `yaml:"totalMem"`
+	TotalCpuShares     uint64 `yaml:"totalCpuShares"`
 	AvailableMem       uint64 `yaml:"availableMem"`
 	AvailableCpuShares uint64 `yaml:"availableCpuShares"`
 }

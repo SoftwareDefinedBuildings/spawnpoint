@@ -1,5 +1,5 @@
 entity: /home/jack/bosswave/keys/spawnpointTest.key
 path: jkolb/spawnpoint/alpha
-alias: omo
+alias: alpha
 memAlloc: 2G
 cpuShares: 2048

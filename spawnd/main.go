@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/immesys/spawnpoint/objects"
+	"github.com/immesys/spawnpoint/uris"
 
 	docker "github.com/fsouza/go-dockerclient"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
@@ -90,14 +91,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	availableCpuShares = Cfg.CpuShares
+	totalCpuShares = Cfg.CpuShares
+	availableCpuShares = totalCpuShares
 	rawMem := Cfg.MemAlloc
-	memAlloc, err := parseMemAlloc(rawMem)
+	totalMem, err = parseMemAlloc(rawMem)
 	if err != nil {
 		fmt.Println("Invalid Spawnpoint memory allocation:", err)
 		os.Exit(1)
 	}
-	availableMem = memAlloc
+	availableMem = totalMem
 
 	bwClient, err = initializeBosswave()
 	if err != nil {
@@ -115,19 +117,19 @@ func main() {
 	}
 	go monitorDockerEvents(&eventCh)
 
-	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/cfg")})
+	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(Cfg.Path, "config")})
 	if err != nil {
 		fmt.Println("Could not subscribe to config URI: ", err)
 		os.Exit(1)
 	}
 
-	restart, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/restart")})
+	restart, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(Cfg.Path, "restart")})
 	if err != nil {
 		fmt.Println("Could not subscribe to restart URI: ", err)
 		os.Exit(1)
 	}
 
-	stop, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: path("ctl/stop")})
+	stop, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(Cfg.Path, "stop")})
 	if err != nil {
 		fmt.Println("Could not subscribe to stop URI: ", err)
 		os.Exit(1)
@@ -174,7 +176,7 @@ func main() {
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
 	err := bwClient.Publish(&bw2.PublishParams{
-		URI:            path("info/spawn/" + svcname + "/log"),
+		URI:            uris.SignalPath(Cfg.Path, "log"),
 		PayloadObjects: POs,
 	})
 	if err != nil {
@@ -233,35 +235,34 @@ func heartbeat() {
 		shares := availableCpuShares
 		availLock.Unlock()
 
-		fmt.Fprintf(os.Stderr, "shares: %v, mem: %v\n", shares, mem)
+		var hburi string
 		msg := objects.SpawnPointHb{
-			Cfg.Alias,
-			time.Now().Format(time.RFC3339),
-			mem,
-			shares,
+			Alias:              Cfg.Alias,
+			Time:               time.Now().UnixNano(),
+			TotalMem:           totalMem,
+			TotalCpuShares:     totalCpuShares,
+			AvailableMem:       mem,
+			AvailableCpuShares: shares,
 		}
-		po, err := bw2.CreateYAMLPayloadObject(bw2.FromDotForm(bw2.PODFSpawnpointHeartbeat), msg)
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.FromDotForm(bw2.PODFSpawnpointHeartbeat), msg)
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to create spawnpoint heartbeat message")
+			time.Sleep(HEARTBEAT_PERIOD * time.Second)
+			continue
 		}
 
-		hburi := path("info/spawn/!heartbeat")
+		hburi = uris.SignalPath(Cfg.Path, "heartbeat")
 		err = bwClient.Publish(&bw2.PublishParams{
-			URI:                hburi,
-			PrimaryAccessChain: PrimaryAccessChain,
-			ElaboratePAC:       bw2.ElaborateFull,
-			Persist:            true,
-			PayloadObjects:     []bw2.PayloadObject{po},
+			URI:            hburi,
+			Persist:        true,
+			PayloadObjects: []bw2.PayloadObject{po},
 		})
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to publish spawnpoint heartbeat message")
 		}
+
 		time.Sleep(HEARTBEAT_PERIOD * time.Second)
 	}
-}
-
-func path(suffix string) string {
-	return Cfg.Path + "/" + suffix
 }
 
 func respawn() {
@@ -286,10 +287,10 @@ func restartService(serviceName string, rebuildImage bool) {
 		if name == serviceName {
 			cnt, err := RestartContainer(manifest, rebuildImage)
 			if err != nil {
-                olog <- SLM{serviceName, "restart failed"}
+				olog <- SLM{serviceName, "restart failed"}
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
-                olog <- SLM{serviceName, "restart successful!"}
+				olog <- SLM{serviceName, "restart successful!"}
 				fmt.Println("Container started ok")
 				manifest.Container = cnt
 			}
@@ -309,10 +310,10 @@ func stopService(serviceName string) {
 			// Updating available mem and cpu shares done by event monitor
 			err := StopContainer(manifest.ServiceName, false)
 			if err != nil {
-                olog <- SLM{serviceName, "failed to stop container"}
+				olog <- SLM{serviceName, "failed to stop container"}
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
-                olog <- SLM{serviceName, "container stopped"}
+				olog <- SLM{serviceName, "container stopped"}
 				fmt.Println("Container stopped successfully")
 			}
 		}
@@ -321,17 +322,17 @@ func stopService(serviceName string) {
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
-    var config *objects.SvcConfig
+	var config *objects.SvcConfig
 
 	defer func() {
 		r := recover()
 		if r != nil {
-            var tag string
-            if config != nil {
-                tag = config.ServiceName
-            } else {
-                tag = "meta"
-            }
+			var tag string
+			if config != nil {
+				tag = config.ServiceName
+			} else {
+				tag = "meta"
+			}
 			olog <- SLM{Service: tag, Message: fmt.Sprintf("Failed to launch service: %+v", r)}
 		}
 	}()
@@ -463,7 +464,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 					if manifest.AutoRestart {
 						cnt, err := RestartContainer(manifest, false)
 						if err != nil {
-                            olog <- SLM{name, "Auto restart failed"}
+							olog <- SLM{name, "Auto restart failed"}
 							fmt.Println("ERROR IN CONTAINER: ", err)
 							delete(runningServices, name)
 							availLock.Lock()
@@ -471,7 +472,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 							availableMem += manifest.MemAlloc
 							availLock.Unlock()
 						} else {
-                            olog <- SLM{name, "Auto restart successful!"}
+							olog <- SLM{name, "Auto restart successful!"}
 							fmt.Println("Container restart ok")
 							manifest.Container = cnt
 						}
