@@ -154,7 +154,7 @@ func main() {
 			}
 
 			if svcName != "" {
-				restartService(svcName, false)
+				restartService(svcName, Cfg.LocalRouter, true)
 			} else {
 				respawn()
 			}
@@ -175,6 +175,7 @@ func main() {
 }
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
+	fmt.Println("publishing to:", uris.ServiceSignalPath(Cfg.Path, svcname, "log"))
 	err := bwClient.Publish(&bw2.PublishParams{
 		URI:            uris.ServiceSignalPath(Cfg.Path, svcname, "log"),
 		PayloadObjects: POs,
@@ -235,6 +236,7 @@ func heartbeat() {
 		shares := availableCpuShares
 		availLock.Unlock()
 
+		fmt.Printf("mem: %v, shares: %v\n", mem, shares)
 		var hburi string
 		msg := objects.SpawnPointHb{
 			Alias:              Cfg.Alias,
@@ -269,13 +271,13 @@ func respawn() {
 	olog <- SLM{"meta", "doing respawn"}
 	runningSvcsLock.Lock()
 	for svcName, manifest := range runningServices {
-		cnt, err := RestartContainer(manifest, true)
+		cnt, err := RestartContainer(manifest, Cfg.LocalRouter, true)
 		if err != nil {
-            msg := fmt.Sprintf("Container restart failed: %v", err)
-            olog <- SLM{svcName, msg}
-            fmt.Println(svcName, "::", msg)
+			msg := fmt.Sprintf("Container restart failed: %v", err)
+			olog <- SLM{svcName, msg}
+			fmt.Println(svcName, "::", msg)
 		} else {
-            olog <- SLM{svcName, "Container start ok"}
+			olog <- SLM{svcName, "Container start ok"}
 			fmt.Println("Container started ok")
 			manifest.Container = cnt
 		}
@@ -283,16 +285,16 @@ func respawn() {
 	runningSvcsLock.Unlock()
 }
 
-func restartService(serviceName string, rebuildImage bool) {
+func restartService(serviceName string, bwRouter string, rebuildImage bool) {
 	olog <- SLM{serviceName, "attempting restart"}
 	runningSvcsLock.Lock()
 	for name, manifest := range runningServices {
 		if name == serviceName {
-			cnt, err := RestartContainer(manifest, rebuildImage)
+			cnt, err := RestartContainer(manifest, bwRouter, rebuildImage)
 			if err != nil {
-                msg := fmt.Sprintf("Container restart failed: %v", err)
+				msg := fmt.Sprintf("Container restart failed: %v", err)
 				olog <- SLM{serviceName, msg}
-                fmt.Println(serviceName, "::", msg)
+				fmt.Println(serviceName, "::", msg)
 			} else {
 				olog <- SLM{serviceName, "restart successful!"}
 				fmt.Println("Container started ok")
@@ -312,12 +314,12 @@ func stopService(serviceName string) {
 			manifest.AutoRestart = false
 
 			// Updating available mem and cpu shares done by event monitor
-			err := StopContainer(manifest.ServiceName, false)
+			err := StopContainer(manifest.ServiceName)
 			if err != nil {
 				olog <- SLM{serviceName, "failed to stop container"}
 				fmt.Println("ERROR IN CONTAINER: ", err)
 			} else {
-				olog <- SLM{serviceName, "container stopped"}
+				// Log message will be output by docker event monitor
 				fmt.Println("Container stopped successfully")
 			}
 		}
@@ -351,7 +353,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
-    fmt.Fprintf(os.Stderr, "%+v\n", config.Build)
+	fmt.Fprintf(os.Stderr, "%+v\n", config.Build)
 
 	rawMem := config.MemAlloc
 	memAlloc, err := parseMemAlloc(rawMem)
@@ -401,7 +403,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	runningSvcsLock.Unlock()
 
 	// Automatically start the new service. This may change in the future...
-	restartService(config.ServiceName, true)
+	restartService(config.ServiceName, Cfg.LocalRouter, true)
 }
 
 func parseMemAlloc(alloc string) (uint64, error) {
@@ -425,11 +427,11 @@ func parseMemAlloc(alloc string) (uint64, error) {
 }
 
 func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
-	buildcontents := make([]string, len(config.Build) + 5)
+	buildcontents := make([]string, len(config.Build)+5)
 	sourceparts := strings.SplitN(config.Source, "+", 2)
 	switch sourceparts[0] {
 	case "git":
-		buildcontents[0] = "RUN git clone " + sourceparts[1] + " /srv/target"
+		buildcontents[0] = "RUN git clone " + sourceparts[1] + " /srv/spawnpoint"
 	default:
 		err := errors.New("Unknown source type")
 		return nil, err
@@ -441,7 +443,7 @@ func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 	}
 	parms64 := base64.StdEncoding.EncodeToString([]byte(parmsString))
 
-	buildcontents[1] = "WORKDIR /srv/target"
+	buildcontents[1] = "WORKDIR /srv/spawnpoint"
 	buildcontents[2] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
 	if config.AptRequires != "" {
 		buildcontents[3] = "RUN apt-get update && apt-get install -y " + config.AptRequires
@@ -466,7 +468,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 					olog <- SLM{name, "Container stopped"}
 
 					if manifest.AutoRestart {
-						cnt, err := RestartContainer(manifest, false)
+						cnt, err := RestartContainer(manifest, Cfg.LocalRouter, false)
 						if err != nil {
 							olog <- SLM{name, "Auto restart failed"}
 							fmt.Println("ERROR IN CONTAINER: ", err)

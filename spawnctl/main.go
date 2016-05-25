@@ -100,40 +100,40 @@ func main() {
 				},
 			},
 		},
-        {
-            Name: "restart",
-            Usage: "Restart a service running on a spawnpoint",
-            Action: actionRestart,
-            Flags: []cli.Flag{
-                cli.StringFlag{
-                    Name: "uri, u",
-                    Usage: "base URI of spawnpoint running the service",
-                    Value: "",
-                },
-                cli.StringFlag{
-                    Name: "name, n",
-                    Usage: "name of the service to restart",
-                    Value: "",
-                },
-            },
-        },
-        {
-            Name: "stop",
-            Usage: "Stop a service running on a spawnpoint",
-            Action: actionRestart,
-            Flags: []cli.Flag{
-                cli.StringFlag{
-                    Name: "uri, u",
-                    Usage: "base URI of spawnpoint running the service",
-                    Value: "",
-                },
-                cli.StringFlag{
-                    Name: "name, n",
-                    Usage: "name of the service to stop",
-                    Value: "",
-                },
-            },
-        },
+		{
+			Name:   "restart",
+			Usage:  "Restart a service running on a spawnpoint",
+			Action: actionRestart,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "uri, u",
+					Usage: "base URI of spawnpoint running the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "name of the service to restart",
+					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "stop",
+			Usage:  "Stop a service running on a spawnpoint",
+			Action: actionStop,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "uri, u",
+					Usage: "base URI of spawnpoint running the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "name of the service to stop",
+					Value: "",
+				},
+			},
+		},
 	}
 	app.Run(os.Args)
 }
@@ -277,7 +277,6 @@ func taillogs(logs []chan *bw2.SimpleMessage) {
 	}
 }
 
-
 func actionDeploy(c *cli.Context) error {
 	BWClient := InitCon(c)
 
@@ -334,15 +333,15 @@ func actionDeploy(c *cli.Context) error {
 				return errors.New(msg)
 			}
 
-            spawnpointURI := fixuri(sp.URI)
-            logUri := uris.ServiceSignalPath(spawnpointURI, svcName, "log")
+			spawnpointURI := fixuri(sp.URI)
+			logUri := uris.ServiceSignalPath(spawnpointURI, svcName, "log")
 			log, err := BWClient.Subscribe(&bw2.SubscribeParams{
 				URI: logUri,
 			})
 			if err != nil {
 				fmt.Println("ERROR subscribing to log:", err)
 			} else {
-                fmt.Println("Subscribed to log:", logUri)
+				fmt.Println("Subscribed to log:", logUri)
 				logs = append(logs, log)
 			}
 
@@ -362,7 +361,7 @@ func actionDeploy(c *cli.Context) error {
 
 	fmt.Printf("%s !! FINISHED DEPLOYMENT, TAILING LOGS. CTRL-C TO QUIT !! %s\n",
 		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
-    taillogs(logs)
+	taillogs(logs)
 
 	return nil
 }
@@ -370,9 +369,9 @@ func actionDeploy(c *cli.Context) error {
 func actionMonitor(c *cli.Context) error {
 	baseuri := fixuri(c.String("uri"))
 	if baseuri == "" {
-        msg := "Missing 'uri' parameter"
+		msg := "Missing 'uri' parameter"
 		fmt.Println(msg)
-        return errors.New(msg)
+		return errors.New(msg)
 	}
 
 	uri := uris.ServiceSignalPath(baseuri, "+", "log")
@@ -388,57 +387,57 @@ func actionMonitor(c *cli.Context) error {
 
 	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
 		uri, ansi.ColorCode("reset"))
-    taillogs([]chan *bw2.SimpleMessage{log})
+	taillogs([]chan *bw2.SimpleMessage{log})
 
 	return nil
 }
 
 func actionRestart(c *cli.Context) error {
-    return manipulateService(c, "restart")
+	return manipulateService(c, "restart")
 }
 
 func actionStop(c *cli.Context) error {
-    return manipulateService(c, "stop")
+	return manipulateService(c, "stop")
 }
 
 func manipulateService(c *cli.Context, command string) error {
-    baseuri := fixuri(c.String("uri"))
-    if baseuri == "" {
-        msg := "Missing 'uri' parameter"
-        fmt.Println(msg)
-        return errors.New(msg)
-    }
-    uri := uris.SlotPath(baseuri, command)
+	baseuri := fixuri(c.String("uri"))
+	if baseuri == "" {
+		msg := "Missing 'uri' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
 
-    svcName := c.String("name")
-    if svcName == "" {
-        msg := "Missing 'name' parameter"
-        fmt.Println(msg)
-        return errors.New(msg)
-    }
+	svcName := c.String("name")
+	if svcName == "" {
+		msg := "Missing 'name' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
 
-    BWClient := InitCon(c)
-    po := bw2.CreateTextPayloadObject(bw2.PONumString, svcName)
-    fmt.Println("publishing to", uri)
-    err := BWClient.Publish(&bw2.PublishParams{
-        URI: uri,
-        PayloadObjects: []bw2.PayloadObject{po},
-    })
-    if err != nil {
-        fmt.Printf("Failed to publish %s request: %v\n", command, err)
-        return err
-    }
+	BWClient := InitCon(c)
 
-    log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
-    if err != nil {
-        msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
-        fmt.Println(msg)
-        return errors.New(msg)
-    }
+	subUri := uris.ServiceSignalPath(baseuri, svcName, "log")
+	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: subUri})
+	if err != nil {
+		msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+
+	po := bw2.CreateTextPayloadObject(bw2.PONumString, svcName)
+	err = BWClient.Publish(&bw2.PublishParams{
+		URI:            uris.SlotPath(baseuri, command),
+		PayloadObjects: []bw2.PayloadObject{po},
+	})
+	if err != nil {
+		fmt.Printf("Failed to publish %s request: %v\n", command, err)
+		return err
+	}
 
 	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
-		uris.ServiceSignalPath(baseuri, svcName, "log"), ansi.ColorCode("reset"))
-    taillogs([]chan *bw2.SimpleMessage{log})
+		subUri, ansi.ColorCode("reset"))
+	taillogs([]chan *bw2.SimpleMessage{log})
 
-    return nil
+	return nil
 }

@@ -59,7 +59,7 @@ func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
 	return rv, nil
 }
 
-func StopContainer(serviceName string, remove bool) error {
+func StopContainer(serviceName string) error {
 	curContainers, err := GetSpawnedContainers()
 	if err != nil {
 		return err
@@ -75,16 +75,14 @@ func StopContainer(serviceName string, remove bool) error {
 				}
 			}
 
-			if remove {
-				fmt.Println("Removing existing container for svc", serviceName)
-				err := DKR.RemoveContainer(docker.RemoveContainerOptions{
-					ID:            containerInfo.Raw.ID,
-					RemoveVolumes: true,
-					Force:         false,
-				})
-				if err != nil {
-					return err
-				}
+			fmt.Println("Removing existing container for svc", serviceName)
+			err := DKR.RemoveContainer(docker.RemoveContainerOptions{
+				ID:            containerInfo.Raw.ID,
+				RemoveVolumes: true,
+				Force:         false,
+			})
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -92,10 +90,10 @@ func StopContainer(serviceName string, remove bool) error {
 	return nil
 }
 
-func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, error) {
+func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*SpawnPointContainer, error) {
 	// First remove previous container
 	fmt.Println("Restarting container for svc", cfg.ServiceName)
-	err := StopContainer(cfg.ServiceName, rebuildImage)
+	err := StopContainer(cfg.ServiceName)
 	if err != nil {
 		fmt.Println("Failed to remove container for svc", cfg.ServiceName)
 		return nil, err
@@ -130,9 +128,10 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 			ContextDir:   tdir,
 			Name:         imgname,
 			NoCache:      true,
+			Pull:         true,
 		})
 		if err != nil {
-            fmt.Printf("Error building new container for svc %s: %v\n", cfg.ServiceName, err)
+			fmt.Printf("Error building new container for svc %s: %v\n", cfg.ServiceName, err)
 			return nil, err
 		}
 	}
@@ -148,9 +147,6 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 			AttachStderr: true,
 			AttachStdin:  true,
 		},
-		HostConfig: &docker.HostConfig{
-			NetworkMode: "host",
-		},
 	})
 	if err != nil {
 		fmt.Println("Error building new container for svc", cfg.ServiceName)
@@ -158,10 +154,19 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 		return nil, err
 	}
 
+	portBindings := make(map[docker.Port][]docker.PortBinding)
+	if strings.HasPrefix(bwRouter, "localhost:") || strings.HasPrefix(bwRouter, "127.0.0.1:") {
+		bwPortNum := bwRouter[strings.Index(bwRouter, ":")+1:]
+		containerPort := docker.Port(bwPortNum + "/tcp")
+		hostPort := docker.PortBinding{HostPort: bwPortNum}
+		portBindings[containerPort] = []docker.PortBinding{hostPort}
+	}
+
 	err = DKR.StartContainer(cnt.ID, &docker.HostConfig{
-		NetworkMode: "host",
-		Memory:      int64(cfg.MemAlloc) * 1024 * 1024,
-		CPUShares:   int64(cfg.CpuShares),
+		NetworkMode:  "host",
+		Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
+		CPUShares:    int64(cfg.CpuShares),
+		PortBindings: portBindings,
 	})
 	if err != nil {
 		fmt.Println("Failed to start container for svc", cfg.ServiceName)

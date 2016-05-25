@@ -5,9 +5,9 @@ alpha:
     container: immesys/spawnpoint:amd64
     source: git+http://github.com/jkolb1/demosvc
     build: [go get -d, go build -o demosvc]
-    run: [demosvc, 100]
+    run: [./demosvc, 100]
     params:
-      message: "Hello, World"
+      msg: "Hello, World"
       to: {{$base}}/out
     memAlloc: 512M
     cpuShares: 1024
