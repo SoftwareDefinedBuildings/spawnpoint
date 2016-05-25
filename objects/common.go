@@ -17,7 +17,7 @@ type SvcConfig struct {
 	ServiceName string            `yaml:"serviceName"`
 	Entity      string            `yaml:"entity"`
 	Container   string            `yaml:"container"`
-	Build       string            `yaml:"build"`
+	Build       []string          `yaml:"build"`
 	Source      string            `yaml:"source"`
 	AptRequires string            `yaml:"aptRequires,omitempty"`
 	Params      map[string]string `yaml:"params"`

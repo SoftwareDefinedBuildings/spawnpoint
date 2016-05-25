@@ -1,12 +1,10 @@
 {{$base := "jkolb/demo"}}
 alpha:
   demosvc:
-    entity: ~/bosswave/keys/spawnpointTest.key
+    entity: /home/jack/bosswave/keys/spawnpointTest.key
     container: immesys/spawnpoint:amd64
     source: git+http://github.com/jkolb1/demosvc
-    build:
-      go get
-      go build -o demosvc
+    build: [go get -d, go build -o demosvc]
     run: [demosvc, 100]
     params:
       message: "Hello, World"

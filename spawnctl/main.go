@@ -100,6 +100,40 @@ func main() {
 				},
 			},
 		},
+        {
+            Name: "restart",
+            Usage: "Restart a service running on a spawnpoint",
+            Action: actionRestart,
+            Flags: []cli.Flag{
+                cli.StringFlag{
+                    Name: "uri, u",
+                    Usage: "base URI of spawnpoint running the service",
+                    Value: "",
+                },
+                cli.StringFlag{
+                    Name: "name, n",
+                    Usage: "name of the service to restart",
+                    Value: "",
+                },
+            },
+        },
+        {
+            Name: "stop",
+            Usage: "Stop a service running on a spawnpoint",
+            Action: actionRestart,
+            Flags: []cli.Flag{
+                cli.StringFlag{
+                    Name: "uri, u",
+                    Usage: "base URI of spawnpoint running the service",
+                    Value: "",
+                },
+                cli.StringFlag{
+                    Name: "name, n",
+                    Usage: "name of the service to stop",
+                    Value: "",
+                },
+            },
+        },
 	}
 	app.Run(os.Args)
 }
@@ -212,6 +246,38 @@ func fixuri(u string) string {
 	return u
 }
 
+func taillogs(logs []chan *bw2.SimpleMessage) {
+	cases := make([]reflect.SelectCase, len(logs))
+	for i, log := range logs {
+		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(log)}
+	}
+
+	for {
+		_, msgVal, _ := reflect.Select(cases)
+		// I may have no idea what I'm doing
+		msg := msgVal.Interface().(*bw2.SimpleMessage)
+
+		for _, po := range msg.POs {
+			if po.IsTypeDF(bw2.PODFSpawnpointLog) {
+				entry := objects.SPLog{}
+				err := po.(bw2.MsgPackPayloadObject).ValueInto(&entry)
+				if err != nil {
+					fmt.Printf("%s[WARN] malformed log entry%s\n", ansi.ColorCode("red+b"),
+						ansi.ColorCode("reset"))
+					continue
+				}
+
+				tstring := time.Unix(0, entry.Time).Format("01/02 15:04:05")
+				fmt.Printf("[%s] %s%s::%s > %s%s\n",
+					tstring, ansi.ColorCode("blue+b"),
+					entry.SPAlias, entry.Service,
+					ansi.ColorCode("reset"), strings.Trim(entry.Contents, "\n"))
+			}
+		}
+	}
+}
+
+
 func actionDeploy(c *cli.Context) error {
 	BWClient := InitCon(c)
 
@@ -268,16 +334,19 @@ func actionDeploy(c *cli.Context) error {
 				return errors.New(msg)
 			}
 
+            spawnpointURI := fixuri(sp.URI)
+            logUri := uris.ServiceSignalPath(spawnpointURI, svcName, "log")
 			log, err := BWClient.Subscribe(&bw2.SubscribeParams{
-				URI: uris.ServiceSignalPath(sp.URI, svcName, "log"),
+				URI: logUri,
 			})
 			if err != nil {
 				fmt.Println("ERROR subscribing to log:", err)
 			} else {
+                fmt.Println("Subscribed to log:", logUri)
 				logs = append(logs, log)
 			}
 
-			uri := uris.SlotPath(sp.URI, "config")
+			uri := uris.SlotPath(spawnpointURI, "config")
 			fmt.Println("publishing cfg to: ", uri)
 			err = BWClient.Publish(&bw2.PublishParams{
 				URI:            uri,
@@ -293,35 +362,7 @@ func actionDeploy(c *cli.Context) error {
 
 	fmt.Printf("%s !! FINISHED DEPLOYMENT, TAILING LOGS. CTRL-C TO QUIT !! %s\n",
 		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
-
-	cases := make([]reflect.SelectCase, len(logs))
-	for i, log := range logs {
-		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(log)}
-	}
-
-	for {
-		_, msgVal, _ := reflect.Select(cases)
-		// I may have no idea what I'm doing
-		msg := msgVal.Interface().(*bw2.SimpleMessage)
-
-		for _, po := range msg.POs {
-			if po.IsTypeDF(bw2.PODFSpawnpointLog) {
-				entry := objects.SPLog{}
-				err := po.(bw2.MsgPackPayloadObject).ValueInto(&entry)
-				if err != nil {
-					fmt.Printf("%s[WARN] malformed log entry%s\n", ansi.ColorCode("red+b"),
-						ansi.ColorCode("reset"))
-					continue
-				}
-
-				tstring := time.Unix(0, entry.Time).Format("01/02 15:04:05")
-				fmt.Printf("[%s] %s%s::%s > %s%s\n",
-					tstring, ansi.ColorCode("blue+b"),
-					entry.SPAlias, entry.Service,
-					ansi.ColorCode("reset"), strings.Trim(entry.Contents, "\n"))
-			}
-		}
-	}
+    taillogs(logs)
 
 	return nil
 }
@@ -329,8 +370,9 @@ func actionDeploy(c *cli.Context) error {
 func actionMonitor(c *cli.Context) error {
 	baseuri := fixuri(c.String("uri"))
 	if baseuri == "" {
-		fmt.Println("Missing 'uri' parameter")
-		os.Exit(1)
+        msg := "Missing 'uri' parameter"
+		fmt.Println(msg)
+        return errors.New(msg)
 	}
 
 	uri := uris.ServiceSignalPath(baseuri, "+", "log")
@@ -346,25 +388,57 @@ func actionMonitor(c *cli.Context) error {
 
 	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
 		uri, ansi.ColorCode("reset"))
-	for msg := range log {
-		for _, po := range msg.POs {
-			if po.GetPONum() != bw2.PONumSpawnpointLog {
-				continue
-			}
-
-			spLog := objects.SPLog{}
-			err = po.(bw2.MsgPackPayloadObject).ValueInto(&spLog)
-			if err != nil {
-				fmt.Printf("%sReceived malformed log message%s", ansi.ColorCode("yellow+b"),
-					ansi.ColorCode("reset"))
-			} else {
-				logTime := time.Unix(0, spLog.Time)
-				fmt.Printf("[%s] %s%s::%s > %s%s\n", logTime.Format("01/02 15:04:05"),
-					ansi.ColorCode("blue+b"), spLog.SPAlias, spLog.Service,
-					ansi.ColorCode("reset"), strings.Trim(spLog.Contents, "\n"))
-			}
-		}
-	}
+    taillogs([]chan *bw2.SimpleMessage{log})
 
 	return nil
+}
+
+func actionRestart(c *cli.Context) error {
+    return manipulateService(c, "restart")
+}
+
+func actionStop(c *cli.Context) error {
+    return manipulateService(c, "stop")
+}
+
+func manipulateService(c *cli.Context, command string) error {
+    baseuri := fixuri(c.String("uri"))
+    if baseuri == "" {
+        msg := "Missing 'uri' parameter"
+        fmt.Println(msg)
+        return errors.New(msg)
+    }
+    uri := uris.SlotPath(baseuri, command)
+
+    svcName := c.String("name")
+    if svcName == "" {
+        msg := "Missing 'name' parameter"
+        fmt.Println(msg)
+        return errors.New(msg)
+    }
+
+    BWClient := InitCon(c)
+    po := bw2.CreateTextPayloadObject(bw2.PONumString, svcName)
+    fmt.Println("publishing to", uri)
+    err := BWClient.Publish(&bw2.PublishParams{
+        URI: uri,
+        PayloadObjects: []bw2.PayloadObject{po},
+    })
+    if err != nil {
+        fmt.Printf("Failed to publish %s request: %v\n", command, err)
+        return err
+    }
+
+    log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
+    if err != nil {
+        msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
+        fmt.Println(msg)
+        return errors.New(msg)
+    }
+
+	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
+		uris.ServiceSignalPath(baseuri, svcName, "log"), ansi.ColorCode("reset"))
+    taillogs([]chan *bw2.SimpleMessage{log})
+
+    return nil
 }

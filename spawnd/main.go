@@ -176,7 +176,7 @@ func main() {
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
 	err := bwClient.Publish(&bw2.PublishParams{
-		URI:            uris.SignalPath(Cfg.Path, "log"),
+		URI:            uris.ServiceSignalPath(Cfg.Path, svcname, "log"),
 		PayloadObjects: POs,
 	})
 	if err != nil {
@@ -268,11 +268,14 @@ func heartbeat() {
 func respawn() {
 	olog <- SLM{"meta", "doing respawn"}
 	runningSvcsLock.Lock()
-	for _, manifest := range runningServices {
+	for svcName, manifest := range runningServices {
 		cnt, err := RestartContainer(manifest, true)
 		if err != nil {
-			fmt.Println("ERROR IN CONTAINER: ", err)
+            msg := fmt.Sprintf("Container restart failed: %v", err)
+            olog <- SLM{svcName, msg}
+            fmt.Println(svcName, "::", msg)
 		} else {
+            olog <- SLM{svcName, "Container start ok"}
 			fmt.Println("Container started ok")
 			manifest.Container = cnt
 		}
@@ -287,8 +290,9 @@ func restartService(serviceName string, rebuildImage bool) {
 		if name == serviceName {
 			cnt, err := RestartContainer(manifest, rebuildImage)
 			if err != nil {
-				olog <- SLM{serviceName, "restart failed"}
-				fmt.Println("ERROR IN CONTAINER: ", err)
+                msg := fmt.Sprintf("Container restart failed: %v", err)
+				olog <- SLM{serviceName, msg}
+                fmt.Println(serviceName, "::", msg)
 			} else {
 				olog <- SLM{serviceName, "restart successful!"}
 				fmt.Println("Container started ok")
@@ -347,6 +351,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
+    fmt.Fprintf(os.Stderr, "%+v\n", config.Build)
 
 	rawMem := config.MemAlloc
 	memAlloc, err := parseMemAlloc(rawMem)
@@ -420,8 +425,7 @@ func parseMemAlloc(alloc string) (uint64, error) {
 }
 
 func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
-	rawbuildcontents := strings.Split(config.Build, "\n")
-	buildcontents := make([]string, len(rawbuildcontents)+5)
+	buildcontents := make([]string, len(config.Build) + 5)
 	sourceparts := strings.SplitN(config.Source, "+", 2)
 	switch sourceparts[0] {
 	case "git":
@@ -445,7 +449,7 @@ func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 		buildcontents[3] = "RUN echo 'no apt-requires'"
 	}
 	buildcontents[4] = "RUN echo " + parms64 + " | base64 --decode > params.yml"
-	for idx, b := range rawbuildcontents {
+	for idx, b := range config.Build {
 		buildcontents[idx+5] = "RUN " + b
 	}
 

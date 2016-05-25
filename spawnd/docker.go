@@ -62,7 +62,6 @@ func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
 func StopContainer(serviceName string, remove bool) error {
 	curContainers, err := GetSpawnedContainers()
 	if err != nil {
-		fmt.Println("Failed to get spawned container list")
 		return err
 	}
 
@@ -72,8 +71,6 @@ func StopContainer(serviceName string, remove bool) error {
 			if containerInfo.Raw.State.Running {
 				err := DKR.StopContainer(containerInfo.Raw.ID, TIMEOUT_LEN)
 				if err != nil {
-					fmt.Println("Failed to kill running container for svc", serviceName)
-					fmt.Println(err)
 					return err
 				}
 			}
@@ -86,7 +83,6 @@ func StopContainer(serviceName string, remove bool) error {
 					Force:         false,
 				})
 				if err != nil {
-					fmt.Printf("Failed to remove container for", serviceName)
 					return err
 				}
 			}
@@ -136,8 +132,7 @@ func RestartContainer(cfg *Manifest, rebuildImage bool) (*SpawnPointContainer, e
 			NoCache:      true,
 		})
 		if err != nil {
-			fmt.Println("Error building new container for svc", cfg.ServiceName)
-			fmt.Println(err)
+            fmt.Printf("Error building new container for svc %s: %v\n", cfg.ServiceName, err)
 			return nil, err
 		}
 	}
