@@ -223,7 +223,8 @@ func parseConfig(filename string) *map[string](map[string]objects.SvcConfig) {
 	tmp = recParse(tmp, filename)
 	buf := bytes.Buffer{}
 	data := struct{}{}
-	err := tmp.ExecuteTemplate(&buf, filename, data)
+	leafName := filename[strings.LastIndex(filename, "/")+1:]
+	err := tmp.ExecuteTemplate(&buf, leafName, data)
 	if err != nil {
 		fmt.Println("Problem with config file: ", err)
 		os.Exit(1)
