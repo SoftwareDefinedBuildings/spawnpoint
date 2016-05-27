@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"gopkg.in/immesys/bw2bind.v2"
+	"gopkg.in/immesys/bw2bind.v5"
 
 	yaml "gopkg.in/yaml.v2"
 )
@@ -31,6 +31,7 @@ func GetParams() (*Params, error) {
 	}
 	return &Params{params}, nil
 }
+
 func GetParamsOrExit() *Params {
 	params, err := GetParams()
 	if err != nil {
@@ -45,10 +46,12 @@ func (p *Params) GetEntity() (blob []byte, err error) {
 	if !ok {
 		return nil, errors.New("Could not decode entity\n")
 	}
+
 	vs, ok := v.(string)
 	if !ok {
 		return nil, errors.New("Could not decode entity\n")
 	}
+
 	eblob, err := base64.StdEncoding.DecodeString(vs)
 	if err != nil {
 		return nil, err
@@ -153,6 +156,7 @@ func (p *Params) GetEntityOrExit() (blob []byte) {
 	}
 	return blob
 }
+
 func (p *Params) MustString(key string) string {
 	rv, ok := p.dat[key]
 	if !ok {
@@ -164,6 +168,7 @@ func (p *Params) MustString(key string) string {
 	}
 	return rvs
 }
+
 func (p *Params) MustInt(key string) int {
 	rv, ok := p.dat[key]
 	if !ok {
