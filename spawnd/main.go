@@ -457,14 +457,21 @@ func parseMemAlloc(alloc string) (uint64, error) {
 }
 
 func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
-	buildcontents := make([]string, len(config.Build)+5)
-	sourceparts := strings.SplitN(config.Source, "+", 2)
-	switch sourceparts[0] {
-	case "git":
-		buildcontents[0] = "RUN git clone " + sourceparts[1] + " /srv/spawnpoint"
-	default:
-		err := errors.New("Unknown source type")
-		return nil, err
+	var buildcontents []string
+	next := 0
+	if config.Source != "" {
+		buildcontents = make([]string, len(config.Build)+5)
+		sourceparts := strings.SplitN(config.Source, "+", 2)
+		switch sourceparts[0] {
+		case "git":
+			buildcontents[next] = "RUN git clone " + sourceparts[1] + " /srv/spawnpoint"
+			next++
+		default:
+			err := errors.New("Unknown source type")
+			return nil, err
+		}
+	} else {
+		buildcontents = make([]string, len(config.Build)+4)
 	}
 
 	parmsString := ""
@@ -473,16 +480,22 @@ func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 	}
 	parms64 := base64.StdEncoding.EncodeToString([]byte(parmsString))
 
-	buildcontents[1] = "WORKDIR /srv/spawnpoint"
-	buildcontents[2] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
+	buildcontents[next] = "WORKDIR /srv/spawnpoint"
+	next++
+	buildcontents[next] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
+	next++
 	if config.AptRequires != "" {
-		buildcontents[3] = "RUN apt-get update && apt-get install -y " + config.AptRequires
+		buildcontents[next] = "RUN apt-get update && apt-get install -y " + config.AptRequires
+		next++
 	} else {
-		buildcontents[3] = "RUN echo 'no apt-requires'"
+		buildcontents[next] = "RUN echo 'no apt-requires'"
+		next++
 	}
-	buildcontents[4] = "RUN echo " + parms64 + " | base64 --decode > params.yml"
-	for idx, b := range config.Build {
-		buildcontents[idx+5] = "RUN " + b
+	buildcontents[next] = "RUN echo " + parms64 + " | base64 --decode > params.yml"
+	next++
+	for _, b := range config.Build {
+		buildcontents[next] = "RUN " + b
+		next++
 	}
 
 	return buildcontents, nil

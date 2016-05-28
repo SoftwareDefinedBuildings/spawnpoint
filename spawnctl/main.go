@@ -140,6 +140,7 @@ func main() {
 
 func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 	scanuri := uris.SignalPath(baseuri, "heartbeat")
+    fmt.Fprintln(os.Stderr, scanuri)
 	res, err := BWC.Query(&bw2.QueryParams{URI: scanuri})
 	if err != nil {
 		fmt.Println("Unable to do query: ", err)
@@ -187,8 +188,8 @@ func actionScan(c *cli.Context) error {
 
 	if strings.HasSuffix(baseuri, "/") {
 		baseuri += "+"
-	} else if !strings.HasSuffix(baseuri, "/+") {
-		baseuri += "/+"
+	} else if !strings.HasSuffix(baseuri, "/*") {
+		baseuri += "/*"
 	}
 
 	spawnPoints := scan(baseuri, BWClient)
