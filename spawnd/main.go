@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codegangsta/cli"
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/uris"
 
@@ -44,6 +45,30 @@ const HEARTBEAT_PERIOD = 5
 type SLM struct {
 	Service string
 	Message string
+}
+
+func main() {
+	app := cli.NewApp()
+	app.Name = "spawnd"
+	app.Usage = "Run a Spawnpoint Daemon"
+	app.Version = "0.0.2"
+
+	app.Commands = []cli.Command{
+		{
+			Name:   "run",
+			Usage:  "Run a spawnpoint daemon",
+			Action: actionRun,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "config, c",
+					Usage: "Specify a configuration file for the daemon",
+					Value: "config.yml",
+				},
+			},
+		},
+	}
+
+	app.Run(os.Args)
 }
 
 func readConfigFromFile(fileName string) (*DaemonConfig, error) {
@@ -80,12 +105,12 @@ func initializeBosswave() (*bw2.BW2Client, error) {
 	return client, nil
 }
 
-func main() {
+func actionRun(c *cli.Context) {
 	runningServices = make(map[string]*Manifest)
 	runningSvcsLock = sync.Mutex{}
 
 	var err error
-	Cfg, err = readConfigFromFile("config.yml")
+	Cfg, err = readConfigFromFile(c.String("config"))
 	if err != nil {
 		fmt.Println("Config file error:", err)
 		os.Exit(1)
