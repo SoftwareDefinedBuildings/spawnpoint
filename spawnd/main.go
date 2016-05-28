@@ -175,7 +175,6 @@ func main() {
 }
 
 func PubLog(svcname string, POs []bw2.PayloadObject) {
-	fmt.Println("publishing to:", uris.ServiceSignalPath(Cfg.Path, svcname, "log"))
 	err := bwClient.Publish(&bw2.PublishParams{
 		URI:            uris.ServiceSignalPath(Cfg.Path, svcname, "log"),
 		PayloadObjects: POs,
@@ -387,6 +386,11 @@ func handleConfig(m *bw2.SimpleMessage) {
 		availableCpuShares -= config.CpuShares
 	}
 
+	logger, err := NewLogger(bwClient, Cfg.Path, Cfg.Alias, config.ServiceName)
+	if err != nil {
+		panic(err)
+	}
+
 	mf := Manifest{
 		ServiceName:   config.ServiceName,
 		Entity:        econtents,
@@ -396,6 +400,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		Build:         buildcontents,
 		Run:           config.Run,
 		AutoRestart:   config.AutoRestart,
+		logger:        logger,
 	}
 
 	runningSvcsLock.Lock()

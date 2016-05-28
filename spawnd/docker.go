@@ -176,8 +176,8 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 	// Attach
 	go DKR.AttachToContainer(docker.AttachToContainerOptions{
 		Container:    cnt.ID,
-		OutputStream: os.Stdout,
-		ErrorStream:  os.Stderr,
+		OutputStream: *cfg.logger,
+		ErrorStream:  *cfg.logger,
 		Logs:         true,
 		Stdout:       true,
 		Stderr:       true,

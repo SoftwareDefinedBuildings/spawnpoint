@@ -10,4 +10,5 @@ type Manifest struct {
 	Run           []string
 	AutoRestart   bool
 	Container     *SpawnPointContainer
+	logger        *BWLogger
 }
