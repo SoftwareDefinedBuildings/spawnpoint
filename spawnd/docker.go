@@ -143,6 +143,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 			OnBuild:      cfg.Build,
 			Cmd:          cfg.Run,
 			Image:        imgname,
+			Env:          []string{"BW2_DEFAULT_ENTITY=/srv/spawnpoint/entity.key"},
 			AttachStdout: true,
 			AttachStderr: true,
 			AttachStdin:  true,
