@@ -5,12 +5,12 @@ import (
 )
 
 type SpawnPointHb struct {
-	Alias              string `yaml:"alias"`
-	Time               int64  `yaml:"time"`
-	TotalMem           uint64 `yaml:"totalMem"`
-	TotalCpuShares     uint64 `yaml:"totalCpuShares"`
-	AvailableMem       uint64 `yaml:"availableMem"`
-	AvailableCpuShares uint64 `yaml:"availableCpuShares"`
+	Alias              string
+	Time               int64
+	TotalMem           uint64
+	TotalCpuShares     uint64
+	AvailableMem       uint64
+	AvailableCpuShares uint64
 }
 
 type SvcConfig struct {
@@ -44,4 +44,14 @@ type SPLog struct {
 	SPAlias  string
 	Service  string
 	Contents string
+}
+
+// Just until this gets pulled into bw2bind
+const PONumSpawnpointSvcHb = 1124073986
+
+type SpawnpointSvcHb struct {
+	SpawnpointURI string
+	Time          int64
+	MemAlloc      uint64
+	CpuShares     uint64
 }

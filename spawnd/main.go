@@ -255,13 +255,13 @@ func doOlog() {
 
 func heartbeat() {
 	for {
+		// Send heartbeat for spawnpoint
 		availLock.Lock()
 		mem := availableMem
 		shares := availableCpuShares
 		availLock.Unlock()
 
 		fmt.Printf("mem: %v, shares: %v\n", mem, shares)
-		var hburi string
 		msg := objects.SpawnPointHb{
 			Alias:              Cfg.Alias,
 			Time:               time.Now().UnixNano(),
@@ -270,14 +270,14 @@ func heartbeat() {
 			AvailableMem:       mem,
 			AvailableCpuShares: shares,
 		}
-		po, err := bw2.CreateMsgPackPayloadObject(bw2.FromDotForm(bw2.PODFSpawnpointHeartbeat), msg)
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, msg)
 		if err != nil {
 			fmt.Println("Failed to create spawnpoint heartbeat message")
 			time.Sleep(HEARTBEAT_PERIOD * time.Second)
 			continue
 		}
 
-		hburi = uris.SignalPath(Cfg.Path, "heartbeat")
+		hburi := uris.SignalPath(Cfg.Path, "heartbeat")
 		err = bwClient.Publish(&bw2.PublishParams{
 			URI:            hburi,
 			Persist:        true,
@@ -286,6 +286,30 @@ func heartbeat() {
 		if err != nil {
 			fmt.Println("Failed to publish spawnpoint heartbeat message")
 		}
+
+		// Send heartbeat for each running service
+		runningSvcsLock.Lock()
+		for name, manifest := range runningServices {
+			hburi = uris.ServiceSignalPath(Cfg.Path, name, "heartbeat")
+			msg := objects.SpawnpointSvcHb{
+				SpawnpointURI: Cfg.Path,
+				Time:          time.Now().UnixNano(),
+				MemAlloc:      manifest.MemAlloc,
+				CpuShares:     manifest.CpuShares,
+			}
+			po, err = bw2.CreateMsgPackPayloadObject(objects.PONumSpawnpointSvcHb, msg)
+			if err != nil {
+				fmt.Println("Failed to create heartbeat message for service ", name)
+				break
+			}
+
+			err = bwClient.Publish(&bw2.PublishParams{
+				URI:            hburi,
+				Persist:        true,
+				PayloadObjects: []bw2.PayloadObject{po},
+			})
+		}
+		runningSvcsLock.Unlock()
 
 		time.Sleep(HEARTBEAT_PERIOD * time.Second)
 	}
@@ -526,6 +550,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 							manifest.Container = cnt
 						}
 					} else {
+						delete(runningServices, name)
 						// Still need to update memory and cpu availability
 						availLock.Lock()
 						availableCpuShares += manifest.CpuShares
