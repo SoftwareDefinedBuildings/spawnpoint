@@ -38,6 +38,8 @@ var (
 	runningSvcsLock sync.Mutex
 )
 
+var svcSpawnCh chan *Manifest
+
 var eventCh chan *docker.APIEvents
 
 const HEARTBEAT_PERIOD = 5
@@ -108,6 +110,8 @@ func initializeBosswave() (*bw2.BW2Client, error) {
 func actionRun(c *cli.Context) {
 	runningServices = make(map[string]*Manifest)
 	runningSvcsLock = sync.Mutex{}
+	svcSpawnCh = make(chan *Manifest, 20)
+	olog = make(chan SLM, 100)
 
 	var err error
 	Cfg, err = readConfigFromFile(c.String("config"))
@@ -160,9 +164,9 @@ func actionRun(c *cli.Context) {
 		os.Exit(1)
 	}
 
-	olog = make(chan SLM, 100)
 	go doOlog()
 	go heartbeat()
+	go doSvcSpawn()
 	fmt.Println("spawnpoint active")
 
 	for {
@@ -179,7 +183,7 @@ func actionRun(c *cli.Context) {
 			}
 
 			if svcName != "" {
-				restartService(svcName, Cfg.LocalRouter, true)
+				restartService(svcName)
 			} else {
 				respawn()
 			}
@@ -334,21 +338,20 @@ func respawn() {
 	runningSvcsLock.Unlock()
 }
 
-func restartService(serviceName string, bwRouter string, rebuildImage bool) {
+func restartService(serviceName string) {
 	olog <- SLM{serviceName, "attempting restart"}
 	runningSvcsLock.Lock()
-	for name, manifest := range runningServices {
-		if name == serviceName {
-			cnt, err := RestartContainer(manifest, bwRouter, rebuildImage)
-			if err != nil {
-				msg := fmt.Sprintf("Container restart failed: %v", err)
-				olog <- SLM{serviceName, msg}
-				fmt.Println(serviceName, "::", msg)
-			} else {
-				olog <- SLM{serviceName, "restart successful!"}
-				fmt.Println("Container started ok")
-				manifest.Container = cnt
-			}
+	manifest, ok := runningServices[serviceName]
+	if ok {
+		cnt, err := RestartContainer(manifest, Cfg.LocalRouter, false)
+		if err != nil {
+			msg := fmt.Sprintf("Container restart failed: %v", err)
+			olog <- SLM{serviceName, msg}
+			fmt.Println(serviceName, "::", msg)
+		} else {
+			olog <- SLM{serviceName, "restart successful!"}
+			fmt.Println("Container restarted ok")
+			manifest.Container = cnt
 		}
 	}
 	runningSvcsLock.Unlock()
@@ -453,12 +456,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		logger:        logger,
 	}
 
-	runningSvcsLock.Lock()
-	runningServices[config.ServiceName] = &mf
-	runningSvcsLock.Unlock()
-
-	// Automatically start the new service. This may change in the future...
-	restartService(config.ServiceName, Cfg.LocalRouter, true)
+	svcSpawnCh <- &mf
 }
 
 func parseMemAlloc(alloc string) (uint64, error) {
@@ -531,8 +529,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 		if event.Action == "die" {
 			runningSvcsLock.Lock()
 			for name, manifest := range runningServices {
-				// Container can be nil when service is registered but not yet started
-				if manifest.Container != nil && manifest.Container.Raw.ID == event.Actor.ID {
+				if manifest.Container.Raw.ID == event.Actor.ID {
 					olog <- SLM{name, "Container stopped"}
 
 					if manifest.AutoRestart {
@@ -560,6 +557,33 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 					}
 				}
 			}
+			runningSvcsLock.Unlock()
+		}
+	}
+}
+
+func doSvcSpawn() {
+	for manifest := range svcSpawnCh {
+		olog <- SLM{manifest.ServiceName, "starting new service"}
+		cnt, err := RestartContainer(manifest, Cfg.LocalRouter, true)
+		if err != nil {
+			msg := fmt.Sprintf("Failed to start new container: %v", err)
+			olog <- SLM{manifest.ServiceName, msg}
+			fmt.Println(manifest.ServiceName, "::", msg)
+
+			// We have to update resource pool manually
+			// Event monitor doesn't know about pending container yet
+			availLock.Lock()
+			availableMem += manifest.MemAlloc
+			availableCpuShares += manifest.CpuShares
+			availLock.Unlock()
+		} else {
+			olog <- SLM{manifest.ServiceName, "start successful!"}
+			fmt.Println("Container started ok")
+			manifest.Container = cnt
+
+			runningSvcsLock.Lock()
+			runningServices[manifest.ServiceName] = manifest
 			runningSvcsLock.Unlock()
 		}
 	}
