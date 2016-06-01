@@ -138,13 +138,12 @@ func main() {
 	app.Run(os.Args)
 }
 
-func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
+func scan(baseuri string, BWC *bw2.BW2Client) (map[string]objects.SpawnPoint, error) {
 	scanuri := uris.SignalPath(baseuri, "heartbeat")
-    fmt.Fprintln(os.Stderr, scanuri)
 	res, err := BWC.Query(&bw2.QueryParams{URI: scanuri})
 	if err != nil {
-		fmt.Println("Unable to do query: ", err)
-		os.Exit(1)
+		fmt.Println("Unable to do scan query:", err)
+		return nil, err
 	}
 
 	rv := make(map[string]objects.SpawnPoint)
@@ -155,12 +154,11 @@ func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
 				if err != nil {
 					fmt.Println("Received malformed heartbeat:", err)
+					continue
 				}
 
-				uri := r.URI
-				uri = uri[:len(uri)-len("s.spawnpoint/server/i.spawnpoint/signal/heartbeat")]
+				uri := r.URI[:len(r.URI)-len("/s.spawnpoint/server/i.spawnpoint/signal/heartbeat")]
 				ls := time.Unix(0, hb.Time)
-
 				v := objects.SpawnPoint{
 					URI:                uri,
 					LastSeen:           ls,
@@ -168,12 +166,59 @@ func scan(baseuri string, BWC *bw2.BW2Client) map[string]objects.SpawnPoint {
 					AvailableMem:       hb.AvailableMem,
 					AvailableCpuShares: hb.AvailableCpuShares,
 				}
+
 				rv[hb.Alias] = v
 			}
 		}
 	}
 
-	return rv
+	return rv, nil
+}
+
+func inspect(spawnpointURI string, BWC *bw2.BW2Client) (map[string]objects.SpawnpointSvcHb, error) {
+	inspectUri := uris.ServiceSignalPath(spawnpointURI, "*", "heartbeat")
+	res, err := BWC.Query(&bw2.QueryParams{URI: inspectUri})
+	if err != nil {
+		fmt.Println("Unable to do inspect query:", err)
+		return nil, err
+	}
+
+	rv := make(map[string]objects.SpawnpointSvcHb)
+	for r := range res {
+		for _, po := range r.POs {
+			if po.IsTypeDF(objects.PODFSpawnpointSvcHb) {
+				hb := objects.SpawnpointSvcHb{}
+				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
+				if err != nil {
+					fmt.Println("Received malformed service heartbeat:", err)
+					continue
+				}
+
+				rv[r.URI] = hb
+			}
+		}
+	}
+
+	return rv, nil
+}
+
+func printLastSeen(lastSeen time.Time, name string, uri string) {
+	var color string
+	if !objects.IsSpawnPointGood(lastSeen) {
+		color = ansi.ColorCode("red+b")
+	} else {
+		color = ansi.ColorCode("green+b")
+	}
+	dur := time.Now().Sub(lastSeen)
+	ls := lastSeen.Format(time.RFC822) + " (" + dur.String() + ")"
+	if uri != "" {
+		fmt.Printf("[%s%s%s] seen %s%s%s ago at %s\n", ansi.ColorCode("blue+b"),
+			name, ansi.ColorCode("reset"), color, ls, ansi.ColorCode("reset"), uri)
+	} else {
+		fmt.Printf("[%s%s%s] seen %s%s%s ago\n", ansi.ColorCode("blue+b"),
+			name, ansi.ColorCode("reset"), color, ls, ansi.ColorCode("reset"))
+	}
+
 }
 
 func actionScan(c *cli.Context) error {
@@ -192,19 +237,37 @@ func actionScan(c *cli.Context) error {
 		baseuri += "/*"
 	}
 
-	spawnPoints := scan(baseuri, BWClient)
-	fmt.Println("Discovered SpawnPoints:")
+	spawnPoints, err := scan(baseuri, BWClient)
+	if err != nil {
+		fmt.Println("Scan failed:", err)
+		return err
+	}
+	fmt.Printf("Discovered %v SpawnPoints:\n", len(spawnPoints))
+	// Print out status information on all discovered spawnpoints
 	for _, sp := range spawnPoints {
-		var color string
-		if !sp.Good() {
-			color = ansi.ColorCode("red+b")
-		} else {
-			color = ansi.ColorCode("green+b")
+		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
+		fmt.Printf("    Available Memory: %v MB, Available Cpu Shares: %v\n",
+			sp.AvailableMem, sp.AvailableCpuShares)
+
+	}
+
+	if len(spawnPoints) == 1 {
+		// Print detailed information about single spawnpoint
+		for _, sp := range spawnPoints {
+			serviceHbs, err := inspect(sp.URI, BWClient)
+			if err != nil {
+				fmt.Println("Inspect failed:", err)
+				return err
+			}
+
+			for _, svcHb := range serviceHbs {
+				lastSeen := time.Unix(0, svcHb.Time)
+				fmt.Print("    ")
+				printLastSeen(lastSeen, svcHb.Name, "")
+				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n",
+					svcHb.MemAlloc, svcHb.CpuShares)
+			}
 		}
-		dur := time.Now().Sub(sp.LastSeen)
-		ls := sp.LastSeen.Format(time.RFC822) + " (" + dur.String() + ")"
-		fmt.Printf("[%s%s%s] seen %s%s%s ago at %s\n", ansi.ColorCode("blue+b"), sp.Alias,
-			ansi.ColorCode("reset"), color, ls, ansi.ColorCode("reset"), sp.URI)
 	}
 
 	return nil
@@ -302,7 +365,11 @@ func actionDeploy(c *cli.Context) error {
 		return errors.New(msg)
 	}
 
-	spawnpoints := scan(baseuri, BWClient)
+	spawnpoints, err := scan(baseuri, BWClient)
+	if err != nil {
+		fmt.Println("Initial spawnpoint scan failed:", err)
+		return err
+	}
 	logs := make([]chan *bw2.SimpleMessage, 0)
 
 	spDeployments := parseConfig(cfg)
@@ -323,6 +390,7 @@ func actionDeploy(c *cli.Context) error {
 					ansi.ColorCode("red+b"), spName, ansi.ColorCode("reset"))
 				continue
 			}
+
 			if !sp.Good() {
 				fmt.Printf("%s[WARN] spawnpoint '%s' appears down. Writing config anyway.%s\n",
 					ansi.ColorCode("yellow+b"), spName, ansi.ColorCode("reset"))

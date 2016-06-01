@@ -39,6 +39,10 @@ func (sp *SpawnPoint) Good() bool {
 	return time.Now().Sub(sp.LastSeen) < 10*time.Second
 }
 
+func IsSpawnPointGood(lastSeen time.Time) bool {
+	return time.Now().Sub(lastSeen) < 10*time.Second
+}
+
 type SPLog struct {
 	Time     int64
 	SPAlias  string
@@ -47,10 +51,12 @@ type SPLog struct {
 }
 
 // Just until this gets pulled into bw2bind
-const PONumSpawnpointSvcHb = 1124073986
+const PONumSpawnpointSvcHb = 33554946
+const PODFSpawnpointSvcHb = `2.0.2.2`
 
 type SpawnpointSvcHb struct {
 	SpawnpointURI string
+	Name          string
 	Time          int64
 	MemAlloc      uint64
 	CpuShares     uint64

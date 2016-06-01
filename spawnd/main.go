@@ -293,6 +293,7 @@ func heartbeat() {
 			hburi = uris.ServiceSignalPath(Cfg.Path, name, "heartbeat")
 			msg := objects.SpawnpointSvcHb{
 				SpawnpointURI: Cfg.Path,
+				Name:          name,
 				Time:          time.Now().UnixNano(),
 				MemAlloc:      manifest.MemAlloc,
 				CpuShares:     manifest.CpuShares,
