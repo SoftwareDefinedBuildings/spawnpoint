@@ -19,13 +19,43 @@ type Params struct {
 	dat map[string]interface{}
 }
 
-func GetParams() (*Params, error) {
+func GetParams() (p *Params, e error) {
+	defer func() {
+		r := recover()
+		if r != nil {
+			p = nil
+			e = fmt.Errorf("Malformed YAML file")
+			return
+		}
+	}()
 	params := make(map[string]interface{})
-	paramContents, err := ioutil.ReadFile("params.yml")
+	in, err := ioutil.ReadFile("params.yml")
 	if err != nil {
 		return nil, err
 	}
-	err = yaml.Unmarshal(paramContents, &params)
+	//Strip out all /* */ comments
+	//we will strip them even inside yaml components
+	out := make([]byte, 0, len(in))
+	level := 0
+	for idx := 0; idx < len(in); idx++ {
+		if in[idx] == '/' && in[idx+1] == '*' {
+			idx += 1
+			level += 1
+			continue
+		}
+		if in[idx] == '*' && in[idx+1] == '/' {
+			idx += 1
+			level -= 1
+			if level < 0 {
+				return nil, fmt.Errorf("unmatched */")
+			}
+			continue
+		}
+		if level == 0 {
+			out = append(out, in[idx])
+		}
+	}
+	err = yaml.Unmarshal(out, &params)
 	if err != nil {
 		return nil, err
 	}
