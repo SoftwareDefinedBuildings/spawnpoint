@@ -298,7 +298,7 @@ func heartbeat() {
 				MemAlloc:      manifest.MemAlloc,
 				CpuShares:     manifest.CpuShares,
 			}
-			po, err = bw2.CreateMsgPackPayloadObject(objects.PONumSpawnpointSvcHb, msg)
+			po, err = bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
 			if err != nil {
 				fmt.Println("Failed to create heartbeat message for service ", name)
 				break

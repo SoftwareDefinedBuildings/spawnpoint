@@ -186,7 +186,7 @@ func inspect(spawnpointURI string, BWC *bw2.BW2Client) (map[string]objects.Spawn
 	rv := make(map[string]objects.SpawnpointSvcHb)
 	for r := range res {
 		for _, po := range r.POs {
-			if po.IsTypeDF(objects.PODFSpawnpointSvcHb) {
+			if po.IsTypeDF(bw2.PODFSpawnpointSvcHb) {
 				hb := objects.SpawnpointSvcHb{}
 				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
 				if err != nil {

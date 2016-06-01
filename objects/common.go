@@ -50,10 +50,6 @@ type SPLog struct {
 	Contents string
 }
 
-// Just until this gets pulled into bw2bind
-const PONumSpawnpointSvcHb = 33554946
-const PODFSpawnpointSvcHb = `2.0.2.2`
-
 type SpawnpointSvcHb struct {
 	SpawnpointURI string
 	Name          string
