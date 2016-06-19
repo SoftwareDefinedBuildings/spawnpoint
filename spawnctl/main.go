@@ -86,6 +86,12 @@ func main() {
 					Usage: "a configuration to deploy",
 					Value: "",
 				},
+
+				cli.StringFlag{
+					Name:  "params, p",
+					Usage: "deployment key/value parameter pairs",
+					Value: "",
+				},
 			},
 		},
 		{
@@ -273,35 +279,51 @@ func actionScan(c *cli.Context) error {
 	return nil
 }
 
-func recParse(t *template.Template, filename string) *template.Template {
-	t2, err := t.ParseFiles(filename)
-	if err != nil {
-		fmt.Println("Problem with config file: ", err)
-		os.Exit(1)
-	}
-	return t2
+func recParse(t *template.Template, filename string) (*template.Template, error) {
+	return t.ParseFiles(filename)
 }
 
-func parseConfig(filename string) *map[string](map[string]objects.SvcConfig) {
+func parseConfig(filename string) (map[string](map[string]objects.SvcConfig), error) {
 	tmp := template.New("root")
-	tmp = recParse(tmp, filename)
-	buf := bytes.Buffer{}
-	data := struct{}{}
-	leafName := filename[strings.LastIndex(filename, "/")+1:]
-	err := tmp.ExecuteTemplate(&buf, leafName, data)
+	tmp, err := recParse(tmp, filename)
 	if err != nil {
-		fmt.Println("Problem with config file: ", err)
-		os.Exit(1)
+		return nil, err
+	}
+
+	buf := bytes.Buffer{}
+	leafName := filename[strings.LastIndex(filename, "/")+1:]
+	err = tmp.ExecuteTemplate(&buf, leafName, struct{}{})
+	if err != nil {
+		return nil, err
 	}
 
 	rv := make(map[string](map[string]objects.SvcConfig))
 	err = yaml.Unmarshal(buf.Bytes(), &rv)
 	if err != nil {
-		fmt.Println("Config syntax error: ", err)
-		os.Exit(1)
+		return nil, err
 	}
 
-	return &rv
+	return rv, nil
+}
+
+func readSvcParamsFromFile(filename string) (map[string](map[string]string), error) {
+	tmp := template.New("root")
+	tmp, err := recParse(tmp, filename)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.Buffer{}
+	leafName := filename[strings.LastIndex(filename, "/")+1:]
+	err = tmp.ExecuteTemplate(&buf, leafName, struct{}{})
+
+	rv := make(map[string](map[string]string))
+	err = yaml.Unmarshal(buf.Bytes(), &rv)
+	if err != nil {
+		return nil, err
+	}
+
+	return rv, nil
 }
 
 func fixuri(u string) string {
@@ -343,6 +365,7 @@ func taillogs(logs []chan *bw2.SimpleMessage) {
 }
 
 func actionDeploy(c *cli.Context) error {
+	var err error
 	BWClient := InitCon(c)
 
 	baseuri := fixuri(c.String("uri"))
@@ -365,6 +388,16 @@ func actionDeploy(c *cli.Context) error {
 		return errors.New(msg)
 	}
 
+	paramsName := c.String("params")
+	svcParams := make(map[string](map[string]string))
+	if len(paramsName) != 0 {
+		svcParams, err = readSvcParamsFromFile(paramsName)
+		if err != nil {
+			fmt.Println("Failed to read params from file:", err)
+			return err
+		}
+	}
+
 	spawnpoints, err := scan(baseuri, BWClient)
 	if err != nil {
 		fmt.Println("Initial spawnpoint scan failed:", err)
@@ -372,8 +405,13 @@ func actionDeploy(c *cli.Context) error {
 	}
 	logs := make([]chan *bw2.SimpleMessage, 0)
 
-	spDeployments := parseConfig(cfg)
-	for spName, svcs := range *spDeployments {
+	spDeployments, err := parseConfig(cfg)
+	if err != nil {
+		fmt.Println("Problem with config file:", err)
+		return err
+	}
+
+	for spName, svcs := range spDeployments {
 		for svcName, config := range svcs {
 			config.ServiceName = svcName
 			entityContents, err := ioutil.ReadFile(config.Entity)
@@ -383,6 +421,11 @@ func actionDeploy(c *cli.Context) error {
 				return errors.New(msg)
 			}
 			config.Entity = base64.StdEncoding.EncodeToString(entityContents)
+
+			params, ok := svcParams[svcName]
+			if ok {
+				config.Params = params
+			}
 
 			sp, ok := spawnpoints[spName]
 			if !ok {
