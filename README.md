@@ -166,7 +166,6 @@ alpha:
     cpuShares: 1024
     autoRestart: true
 ```
-
 #### Installing the Service at a Spawnpoint
 Use the `deploy` command to install and run services according to a particular
 configuration at one or more spawnpoints. For example, if we want to use the
@@ -182,6 +181,30 @@ $ spawnctl deploy -u scratch.ns/spawnpoint -c example.yml
 After configurations have been deployed to the relevant Spawnpoint instances,
 log messages from those Spawnpoints concerning these services will appear
 on the screen until the user presses `<CTRL>-C`.
+
+#### Defining Parameters in a Separate File
+You may also define the parameters for a Spawnpoint service in an external file
+rather than directly in the service's configuration file. This facilitates the
+deployment of many services with the same configuration but different
+parameters.
+
+First, you will need to create a YAML file with the parameters for each service
+you wish to deploy. In the case of the `demosvc` example, that file would be as
+follows:
+```yaml
+{{$base := "jkolb/demo"}}
+demosvc:
+  msg: "Hello, World"
+  to: {{$base}}/out
+```
+Note that you can use the same templating tools as with configuration files, as
+demonstrated by the `base` variable above.
+
+Next, you will need to pass an extra flag, `-p` or `--params`, to the `deploy`
+command for `spawnctl`. Modifying the `deploy` command would give us:
+```
+$ spawnctl deploy -u scratch.ns/spawnpoint -c example.yml -p params.yml
+```
 
 ### Restarting/Stopping a Service
 To restart or stop a service, you must know the base URI of the Spawnpoint on
