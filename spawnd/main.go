@@ -178,7 +178,7 @@ func actionRun(c *cli.Context) {
 			svcName := ""
 			for _, po := range r.POs {
 				// Annoying, but need to check for either dot form or regular number
-				if po.IsTypeDF(bw2.PODFString) || po.IsType(bw2.PONumText, bw2.POMaskText) {
+				if po.IsTypeDF(bw2.PODFText) {
 					svcName = string(po.GetContents())
 				}
 			}
@@ -193,7 +193,7 @@ func actionRun(c *cli.Context) {
 			svcName := ""
 			for _, po := range s.POs {
 				// Same issue as restart PO check
-				if po.IsTypeDF(bw2.PODFString) || po.IsType(bw2.PONumText, bw2.POMaskText) {
+				if po.IsTypeDF(bw2.PODFText) {
 					svcName = string(po.GetContents())
 				}
 			}
@@ -355,6 +355,8 @@ func restartService(serviceName string) {
 			fmt.Println("Container restarted ok")
 			manifest.Container = cnt
 		}
+	} else {
+		olog <- SLM{serviceName, "service does not exist"}
 	}
 	runningSvcsLock.Unlock()
 }
