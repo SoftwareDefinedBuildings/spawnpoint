@@ -9,8 +9,8 @@ type SpawnPointHb struct {
 	Time               int64
 	TotalMem           uint64
 	TotalCpuShares     uint64
-	AvailableMem       uint64
-	AvailableCpuShares uint64
+	AvailableMem       int64
+	AvailableCpuShares int64
 }
 
 type SvcConfig struct {

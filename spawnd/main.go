@@ -28,8 +28,8 @@ var olog chan SLM
 var (
 	totalMem           uint64 // Memory dedicated to Spawnpoint, in MiB
 	totalCpuShares     uint64 // CPU shares for Spawnpoint, 1024 per core
-	availableMem       uint64
-	availableCpuShares uint64
+	availableMem       int64
+	availableCpuShares int64
 	availLock          sync.Mutex
 )
 
@@ -121,14 +121,14 @@ func actionRun(c *cli.Context) {
 	}
 
 	totalCpuShares = Cfg.CpuShares
-	availableCpuShares = totalCpuShares
+	availableCpuShares = int64(totalCpuShares)
 	rawMem := Cfg.MemAlloc
 	totalMem, err = parseMemAlloc(rawMem)
 	if err != nil {
 		fmt.Println("Invalid Spawnpoint memory allocation:", err)
 		os.Exit(1)
 	}
-	availableMem = totalMem
+	availableMem = int64(totalMem)
 
 	bwClient, err = initializeBosswave()
 	if err != nil {
@@ -409,7 +409,6 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Fprintf(os.Stderr, "%+v\n", config.Build)
 
 	rawMem := config.MemAlloc
 	memAlloc, err := parseMemAlloc(rawMem)
@@ -427,20 +426,38 @@ func handleConfig(m *bw2.SimpleMessage) {
 		panic(err)
 	}
 
+	// Previous version of service could already be running
+	runningSvcsLock.Lock()
+	existingManifest, ok := runningServices[config.ServiceName]
+	runningSvcsLock.Unlock()
+	previousMem := int64(0)
+	previousCpu := int64(0)
+	if ok {
+		olog <- SLM{config.ServiceName, "Found instance of service already running"}
+		previousMem = int64(existingManifest.MemAlloc)
+		previousCpu = int64(existingManifest.CpuShares)
+	}
+
 	// Check if Spawnpoint has sufficient resources. If not, reject configuration
 	availLock.Lock()
 	defer availLock.Unlock()
-	if memAlloc > availableMem {
+	if int64(memAlloc) > (availableMem + int64(previousMem)) {
 		err = fmt.Errorf("Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
-			availableMem, memAlloc)
+			availableMem+previousMem, memAlloc)
 		panic(err)
-	} else if config.CpuShares > availableCpuShares {
+	} else if int64(config.CpuShares) > (availableCpuShares + int64(previousCpu)) {
 		err = fmt.Errorf("Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
-			availableCpuShares, config.CpuShares)
+			availableCpuShares+previousCpu, config.CpuShares)
 		panic(err)
 	} else {
-		availableMem -= memAlloc
-		availableCpuShares -= config.CpuShares
+		availableMem -= int64(memAlloc)
+		availableCpuShares -= int64(config.CpuShares)
+	}
+
+	// Remove previous service version if necessary
+	if ok {
+		olog <- SLM{config.ServiceName, "Removing old version"}
+		stopService(config.ServiceName)
 	}
 
 	logger, err := NewLogger(bwClient, Cfg.Path, Cfg.Alias, config.ServiceName)
@@ -543,8 +560,8 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 							fmt.Println("ERROR IN CONTAINER: ", err)
 							delete(runningServices, name)
 							availLock.Lock()
-							availableCpuShares += manifest.CpuShares
-							availableMem += manifest.MemAlloc
+							availableCpuShares += int64(manifest.CpuShares)
+							availableMem += int64(manifest.MemAlloc)
 							availLock.Unlock()
 						} else {
 							olog <- SLM{name, "Auto restart successful!"}
@@ -555,8 +572,8 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 						delete(runningServices, name)
 						// Still need to update memory and cpu availability
 						availLock.Lock()
-						availableCpuShares += manifest.CpuShares
-						availableMem += manifest.MemAlloc
+						availableCpuShares += int64(manifest.CpuShares)
+						availableMem += int64(manifest.MemAlloc)
 						availLock.Unlock()
 					}
 				}
@@ -578,8 +595,8 @@ func doSvcSpawn() {
 			// We have to update resource pool manually
 			// Event monitor doesn't know about pending container yet
 			availLock.Lock()
-			availableMem += manifest.MemAlloc
-			availableCpuShares += manifest.CpuShares
+			availableMem += int64(manifest.MemAlloc)
+			availableCpuShares += int64(manifest.CpuShares)
 			availLock.Unlock()
 		} else {
 			olog <- SLM{manifest.ServiceName, "start successful!"}
