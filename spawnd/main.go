@@ -177,8 +177,7 @@ func actionRun(c *cli.Context) {
 		case r := <-restart:
 			svcName := ""
 			for _, po := range r.POs {
-				// Annoying, but need to check for either dot form or regular number
-				if po.IsTypeDF(bw2.PODFText) {
+				if po.IsTypeDF(bw2.PODFString) {
 					svcName = string(po.GetContents())
 				}
 			}
@@ -192,8 +191,7 @@ func actionRun(c *cli.Context) {
 		case s := <-stop:
 			svcName := ""
 			for _, po := range s.POs {
-				// Same issue as restart PO check
-				if po.IsTypeDF(bw2.PODFText) {
+				if po.IsTypeDF(bw2.PODFString) {
 					svcName = string(po.GetContents())
 				}
 			}
