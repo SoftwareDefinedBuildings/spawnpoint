@@ -31,8 +31,8 @@ type SpawnPoint struct {
 	URI                string
 	LastSeen           time.Time
 	Alias              string
-	AvailableCpuShares uint64
-	AvailableMem       uint64
+	AvailableCpuShares int64
+	AvailableMem       int64
 }
 
 func (sp *SpawnPoint) Good() bool {
