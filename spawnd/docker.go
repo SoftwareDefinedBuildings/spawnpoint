@@ -16,6 +16,7 @@ var DKR *docker.Client
 type SpawnPointContainer struct {
 	Raw         *docker.Container
 	ServiceName string
+	StatChan    *chan *docker.Stats
 }
 
 func ConnectDocker() (chan *docker.APIEvents, error) {
@@ -185,5 +186,13 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 		Stream:       true,
 	})
 
-	return &SpawnPointContainer{Raw: cnt, ServiceName: cfg.ServiceName}, nil
+	// Collect statistics
+	statChan := make(chan *docker.Stats)
+	go DKR.Stats(docker.StatsOptions{
+		ID:     cnt.ID,
+		Stats:  statChan,
+		Stream: true,
+	})
+
+	return &SpawnPointContainer{cnt, cfg.ServiceName, &statChan}, nil
 }

@@ -291,20 +291,34 @@ func heartbeat() {
 			fmt.Println("Failed to publish spawnpoint heartbeat message")
 		}
 
-		// Send heartbeat for each running service
-		runningSvcsLock.Lock()
-		for name, manifest := range runningServices {
-			hburi = uris.ServiceSignalPath(Cfg.Path, name, "heartbeat")
+		time.Sleep(HEARTBEAT_PERIOD * time.Second)
+	}
+}
+
+func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
+	lastEmitted := time.Now()
+	for stats := range *statCh {
+		if stats.Read.Sub(lastEmitted).Seconds() > HEARTBEAT_PERIOD {
+			fmt.Fprintln(os.Stderr, "foobar")
+			runningSvcsLock.Lock()
+			manifest, ok := runningServices[svcname]
+			runningSvcsLock.Unlock()
+			if !ok {
+				return
+			}
+
+			hburi := uris.ServiceSignalPath(Cfg.Path, svcname, "heartbeat")
 			msg := objects.SpawnpointSvcHb{
 				SpawnpointURI: Cfg.Path,
-				Name:          name,
+				Name:          svcname,
 				Time:          time.Now().UnixNano(),
 				MemAlloc:      manifest.MemAlloc,
 				CpuShares:     manifest.CpuShares,
 			}
-			po, err = bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
+
+			po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
 			if err != nil {
-				fmt.Println("Failed to create heartbeat message for service ", name)
+				fmt.Println("Failed to create heartbeat message for service ", svcname)
 				break
 			}
 
@@ -313,10 +327,13 @@ func heartbeat() {
 				Persist:        true,
 				PayloadObjects: []bw2.PayloadObject{po},
 			})
-		}
-		runningSvcsLock.Unlock()
+			if err != nil {
+				fmt.Println("Failed to publish heartbeat message for service", svcname)
+				break
+			}
 
-		time.Sleep(HEARTBEAT_PERIOD * time.Second)
+			lastEmitted = time.Now()
+		}
 	}
 }
 
@@ -352,6 +369,7 @@ func restartService(serviceName string) {
 			olog <- SLM{serviceName, "restart successful!"}
 			fmt.Println("Container restarted ok")
 			manifest.Container = cnt
+			go svcHeartbeat(serviceName, cnt.StatChan)
 		}
 	} else {
 		olog <- SLM{serviceName, "service does not exist"}
@@ -565,6 +583,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 							olog <- SLM{name, "Auto restart successful!"}
 							fmt.Println("Container restart ok")
 							manifest.Container = cnt
+							go svcHeartbeat(manifest.ServiceName, cnt.StatChan)
 						}
 					} else {
 						delete(runningServices, name)
@@ -605,5 +624,7 @@ func doSvcSpawn() {
 			runningServices[manifest.ServiceName] = manifest
 			runningSvcsLock.Unlock()
 		}
+
+		go svcHeartbeat(manifest.ServiceName, manifest.Container.StatChan)
 	}
 }
