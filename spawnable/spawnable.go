@@ -223,9 +223,13 @@ func (p *Params) MustStringSlice(key string) []string {
 			for _, s := range ifl {
 				if str, ok := s.(string); ok {
 					r = append(r, str)
+				} else {
+					fmt.Printf("Parameter '%s' cannot convert all entities to string slice\n", key)
 				}
 			}
 			return r
+		} else {
+			fmt.Printf("Parameter '%s' should be a string slice\n", key)
 		}
 	}
 	return rvi
