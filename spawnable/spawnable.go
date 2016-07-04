@@ -216,8 +216,7 @@ func (p *Params) MustStringSlice(key string) []string {
 	if !ok {
 		fmt.Printf("Missing paramater '%s'\n", key)
 	}
-	rvi, ok := rv.([]string)
-	if !ok {
+	if rvi, ok := rv.([]string); !ok {
 		var r []string
 		if ifl, ok := rv.([]interface{}); ok {
 			for _, s := range ifl {
