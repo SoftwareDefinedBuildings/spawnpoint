@@ -211,6 +211,26 @@ func (p *Params) MustInt(key string) int {
 	return rvi
 }
 
+func (p *Params) MustStringSlice(key string) []string {
+	rv, ok := p.dat[key]
+	if !ok {
+		fmt.Printf("Missing paramater '%s'\n", key)
+	}
+	rvi, ok := rv.([]string)
+	if !ok {
+		var r []string
+		if ifl, ok := rv.([]interface{}); ok {
+			for _, s := range ifl {
+				if str, ok := s.(string); ok {
+					r = append(r, str)
+				}
+			}
+			return r
+		}
+	}
+	return rvi
+}
+
 func DoHttpPutStr(uri, content string, headers []string) string {
 	client := &http.Client{}
 	req, err := http.NewRequest("PUT",
