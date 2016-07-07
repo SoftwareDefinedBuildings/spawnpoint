@@ -56,4 +56,10 @@ type SpawnpointSvcHb struct {
 	Time          int64
 	MemAlloc      uint64
 	CpuShares     uint64
+	MemUsage      float64
+	NetworkRx     float64
+	NetworkTx     float64
+	MbRead        float64
+	MbWritten     float64
+	CpuPercent    float64
 }

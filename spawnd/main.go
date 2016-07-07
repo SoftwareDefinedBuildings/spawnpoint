@@ -297,14 +297,36 @@ func heartbeat() {
 
 func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 	lastEmitted := time.Now()
+	lastCpuPercentage := 0.0
 	for stats := range *statCh {
 		if stats.Read.Sub(lastEmitted).Seconds() > HEARTBEAT_PERIOD {
-			fmt.Fprintln(os.Stderr, "foobar")
 			runningSvcsLock.Lock()
 			manifest, ok := runningServices[svcname]
 			runningSvcsLock.Unlock()
 			if !ok {
 				return
+			}
+
+			mbRead := 0.0
+			mbWritten := 0.0
+			for _, ioStats := range stats.BlkioStats.IOServiceBytesRecursive {
+				if ioStats.Op == "Read" {
+					mbRead += float64(ioStats.Value)
+				} else if ioStats.Op == "Write" {
+					mbWritten += float64(ioStats.Value)
+				}
+			}
+			mbRead /= (1024 * 1024)
+			mbWritten /= (1024 * 1024)
+
+			// Based on Docker's 'calculateCPUPercent' function
+			containerCpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage -
+				stats.PreCPUStats.CPUUsage.TotalUsage)
+			systemCpuDelta := float64(stats.CPUStats.SystemCPUUsage -
+				stats.PreCPUStats.SystemCPUUsage)
+			if systemCpuDelta > 0.0 {
+				numCores := float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+				lastCpuPercentage = (containerCpuDelta / systemCpuDelta) * numCores * 100.0
 			}
 
 			hburi := uris.ServiceSignalPath(Cfg.Path, svcname, "heartbeat")
@@ -314,6 +336,12 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 				Time:          time.Now().UnixNano(),
 				MemAlloc:      manifest.MemAlloc,
 				CpuShares:     manifest.CpuShares,
+				MemUsage:      float64(stats.MemoryStats.Usage) / (1024 * 1024),
+				NetworkRx:     float64(stats.Network.RxBytes) / (1024 * 1024),
+				NetworkTx:     float64(stats.Network.TxBytes) / (1024 * 1024),
+				MbRead:        mbRead,
+				MbWritten:     mbWritten,
+				CpuPercent:    lastCpuPercentage,
 			}
 
 			po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
