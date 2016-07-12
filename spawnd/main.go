@@ -89,10 +89,6 @@ func readConfigFromFile(fileName string) (*DaemonConfig, error) {
 }
 
 func initializeBosswave() (*bw2.BW2Client, error) {
-	if Cfg.LocalRouter == "" {
-		Cfg.LocalRouter = "127.0.0.1:28589"
-	}
-
 	client, err := bw2.Connect(Cfg.LocalRouter)
 	if err != nil {
 		return nil, err
