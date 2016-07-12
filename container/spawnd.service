@@ -1,0 +1,20 @@
+[Unit]
+Description=spawnd
+After=bw2.service
+
+[Service]
+Restart=always
+RestartSec=1m
+ExecStartPre=/usr/bin/docker pull r.cal-sdb.org/spawnd
+TimeoutStartSec=10m
+
+ExecStart=/bin/bash -c "/usr/bin/docker run \
+    --name %p \
+    -e BW2_AGENT=$(/sbin/ip route show | /bin/grep docker0 | /usr/bin/awk '{print $9}'):28589 \
+    -v /etc/spawnd:/etc/spawnd \
+    r.cal-sdb.org/spawnd"
+
+ExecStop=/usr/bin/docker stop -t 30 %p ; /usr/bin/docker rm -f %p
+
+[Install]
+WantedBy=multi-user.target
