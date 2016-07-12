@@ -538,7 +538,7 @@ func manipulateService(c *cli.Context, command string) error {
 		return errors.New(msg)
 	}
 
-	po := bw2.CreateTextPayloadObject(bw2.PONumText, svcName)
+	po := bw2.CreateTextPayloadObject(bw2.PONumString, svcName)
 	err = BWClient.Publish(&bw2.PublishParams{
 		URI:            uris.SlotPath(baseuri, command),
 		PayloadObjects: []bw2.PayloadObject{po},
