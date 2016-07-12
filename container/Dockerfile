@@ -1,10 +1,11 @@
 FROM ubuntu:xenial
 MAINTAINER Jack Kolb <jkolb@berkeley.edu>
 
-# Set up golang
+# Install packages
 RUN apt-get update && apt-get dist-upgrade -y && \
     apt-get install -y git build-essential wget curl libssl-dev
 
+# Set up golang
 RUN wget -O /tmp/go.tar.gz \
     https://storage.googleapis.com/golang/go1.6.2.linux-amd64.tar.gz && \
     tar -xf /tmp/go.tar.gz -C /usr/local/ && \
