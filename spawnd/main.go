@@ -647,8 +647,8 @@ func doSvcSpawn() {
 			runningSvcsLock.Lock()
 			runningServices[manifest.ServiceName] = manifest
 			runningSvcsLock.Unlock()
-		}
 
-		go svcHeartbeat(manifest.ServiceName, manifest.Container.StatChan)
+			go svcHeartbeat(manifest.ServiceName, manifest.Container.StatChan)
+		}
 	}
 }
