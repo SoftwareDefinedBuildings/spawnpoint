@@ -170,7 +170,7 @@ func scan(baseuri string, BWC *bw2.BW2Client) (map[string]objects.SpawnPoint, er
 					LastSeen:           ls,
 					Alias:              hb.Alias,
 					AvailableMem:       hb.AvailableMem,
-					AvailableCpuShares: hb.AvailableCpuShares,
+					AvailableCPUShares: hb.AvailableCPUShares,
 				}
 
 				rv[hb.Alias] = v
@@ -182,8 +182,8 @@ func scan(baseuri string, BWC *bw2.BW2Client) (map[string]objects.SpawnPoint, er
 }
 
 func inspect(spawnpointURI string, BWC *bw2.BW2Client) (map[string]objects.SpawnpointSvcHb, error) {
-	inspectUri := uris.ServiceSignalPath(spawnpointURI, "*", "heartbeat")
-	res, err := BWC.Query(&bw2.QueryParams{URI: inspectUri})
+	inspectURI := uris.ServiceSignalPath(spawnpointURI, "*", "heartbeat")
+	res, err := BWC.Query(&bw2.QueryParams{URI: inspectURI})
 	if err != nil {
 		fmt.Println("Unable to do inspect query:", err)
 		return nil, err
@@ -253,7 +253,7 @@ func actionScan(c *cli.Context) error {
 	for _, sp := range spawnPoints {
 		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
 		fmt.Printf("    Available Memory: %v MB, Available Cpu Shares: %v\n",
-			sp.AvailableMem, sp.AvailableCpuShares)
+			sp.AvailableMem, sp.AvailableCPUShares)
 
 	}
 
@@ -271,7 +271,7 @@ func actionScan(c *cli.Context) error {
 				fmt.Print("    ")
 				printLastSeen(lastSeen, svcHb.Name, "")
 				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n",
-					svcHb.MemAlloc, svcHb.CpuShares)
+					svcHb.MemAlloc, svcHb.CPUShares)
 			}
 		}
 	}
@@ -403,7 +403,7 @@ func actionDeploy(c *cli.Context) error {
 		fmt.Println("Initial spawnpoint scan failed:", err)
 		return err
 	}
-	logs := make([]chan *bw2.SimpleMessage, 0)
+	var logs []chan *bw2.SimpleMessage
 
 	spDeployments, err := parseConfig(cfg)
 	if err != nil {
@@ -447,14 +447,14 @@ func actionDeploy(c *cli.Context) error {
 			}
 
 			spawnpointURI := fixuri(sp.URI)
-			logUri := uris.ServiceSignalPath(spawnpointURI, svcName, "log")
+			logURI := uris.ServiceSignalPath(spawnpointURI, svcName, "log")
 			log, err := BWClient.Subscribe(&bw2.SubscribeParams{
-				URI: logUri,
+				URI: logURI,
 			})
 			if err != nil {
 				fmt.Println("ERROR subscribing to log:", err)
 			} else {
-				fmt.Println("Subscribed to log:", logUri)
+				fmt.Println("Subscribed to log:", logURI)
 				logs = append(logs, log)
 			}
 
@@ -530,8 +530,8 @@ func manipulateService(c *cli.Context, command string) error {
 
 	BWClient := InitCon(c)
 
-	subUri := uris.ServiceSignalPath(baseuri, svcName, "log")
-	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: subUri})
+	subURI := uris.ServiceSignalPath(baseuri, svcName, "log")
+	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: subURI})
 	if err != nil {
 		msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
 		fmt.Println(msg)
@@ -549,7 +549,7 @@ func manipulateService(c *cli.Context, command string) error {
 	}
 
 	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
-		subUri, ansi.ColorCode("reset"))
+		subURI, ansi.ColorCode("reset"))
 	taillogs([]chan *bw2.SimpleMessage{log})
 
 	return nil

@@ -5,10 +5,11 @@ type Manifest struct {
 	Entity        []byte
 	ContainerType string
 	MemAlloc      uint64
-	CpuShares     uint64
+	CPUShares     uint64
 	Build         []string
 	Run           []string
 	AutoRestart   bool
 	Container     *SpawnPointContainer
+	Volumes       []string
 	logger        *BWLogger
 }
