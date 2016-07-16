@@ -9,9 +9,9 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 )
 
-const TIMEOUT_LEN = 3
+const timeoutLen = 3
 
-var DKR *docker.Client
+var dkr *docker.Client
 
 type SpawnPointContainer struct {
 	Raw         *docker.Container
@@ -21,38 +21,38 @@ type SpawnPointContainer struct {
 
 func ConnectDocker() (chan *docker.APIEvents, error) {
 	var err error
-	DKR, err = docker.NewClient("unix:///var/run/docker.sock")
+	dkr, err = docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
 		return nil, err
 	}
 
-	ev_chan := make(chan *docker.APIEvents)
-	DKR.AddEventListener(ev_chan)
-	return ev_chan, err
+	evChan := make(chan *docker.APIEvents)
+	dkr.AddEventListener(evChan)
+	return evChan, err
 }
 
 func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
-	rawrv, err := DKR.ListContainers(docker.ListContainersOptions{
+	rawrv, err := dkr.ListContainers(docker.ListContainersOptions{
 		All: true,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	rv := make([]*SpawnPointContainer, 0)
+	var rv []*SpawnPointContainer
 	for _, containerInfo := range rawrv {
 		for _, name := range containerInfo.Names {
 			if strings.HasPrefix(name, "/spawnpoint_") {
-				container, err := DKR.InspectContainer(containerInfo.ID)
+				container, err := dkr.InspectContainer(containerInfo.ID)
 				if err != nil {
 					return nil, err
-				} else {
-					rv = append(rv, &SpawnPointContainer{
-						Raw:         container,
-						ServiceName: name[len("/spawnpoint_"):],
-					})
-					break
 				}
+
+				rv = append(rv, &SpawnPointContainer{
+					Raw:         container,
+					ServiceName: name[len("/spawnpoint_"):],
+				})
+				break
 			}
 		}
 	}
@@ -70,14 +70,14 @@ func StopContainer(serviceName string) error {
 		if containerInfo.ServiceName == serviceName {
 			fmt.Println("Found existing container for service, deleting")
 			if containerInfo.Raw.State.Running {
-				err := DKR.StopContainer(containerInfo.Raw.ID, TIMEOUT_LEN)
+				err := dkr.StopContainer(containerInfo.Raw.ID, timeoutLen)
 				if err != nil {
 					return err
 				}
 			}
 
 			fmt.Println("Removing existing container for svc", serviceName)
-			err := DKR.RemoveContainer(docker.RemoveContainerOptions{
+			err := dkr.RemoveContainer(docker.RemoveContainerOptions{
 				ID:            containerInfo.Raw.ID,
 				RemoveVolumes: true,
 				Force:         false,
@@ -91,7 +91,7 @@ func StopContainer(serviceName string) error {
 	return nil
 }
 
-func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*SpawnPointContainer, error) {
+func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPointContainer, error) {
 	// First remove previous container
 	fmt.Println("Restarting container for svc", cfg.ServiceName)
 	err := StopContainer(cfg.ServiceName)
@@ -101,43 +101,21 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 	}
 
 	// Then rebuild image if necessary
-	imgname := "spawnpoint_image_" + cfg.ServiceName
-	if rebuildImage {
-		err = DKR.RemoveImage(imgname)
-		if err != nil && err != docker.ErrNoSuchImage {
-			fmt.Println("Failed to remove image for svc", cfg.ServiceName)
-			return nil, err
-		}
-
-		dfile := []string{"FROM immesys/spawnpoint:amd64"}
-		dfile = append(dfile, cfg.Build...)
-
-		tdir, err := ioutil.TempDir("", "spawnpoint")
-		tname := tdir + "/dockerfile"
+	imgname := "spawnpoint_" + cfg.ServiceName
+	if rebuildImg {
+		err = rebuildImage(cfg, imgname)
 		if err != nil {
-			return nil, err
-		}
-		err = ioutil.WriteFile(tname, []byte(strings.Join(dfile, "\n")), 0666)
-		if err != nil {
-			fmt.Println("Failed to construct dockerfile for", cfg.ServiceName)
-			return nil, err
-		}
-
-		err = DKR.BuildImage(docker.BuildImageOptions{
-			Dockerfile:   "dockerfile",
-			OutputStream: os.Stdout,
-			ContextDir:   tdir,
-			Name:         imgname,
-			NoCache:      true,
-			Pull:         true,
-		})
-		if err != nil {
-			fmt.Printf("Error building new container for svc %s: %v\n", cfg.ServiceName, err)
+			fmt.Printf("Failed to build image for svc %s: %v\n", cfg.ServiceName, err)
 			return nil, err
 		}
 	}
 
-	cnt, err := DKR.CreateContainer(docker.CreateContainerOptions{
+	mounts, err := createMounts(cfg.ServiceName, cfg.Volumes)
+	if err != nil {
+		fmt.Printf("Failed to set up container volumes: %v\n", err)
+	}
+
+	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
 		Name: "spawnpoint_" + cfg.ServiceName,
 		Config: &docker.Config{
 			WorkingDir:   "/srv/spawnpoint/",
@@ -145,6 +123,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 			Cmd:          cfg.Run,
 			Image:        imgname,
 			Env:          []string{"BW2_DEFAULT_ENTITY=/srv/spawnpoint/entity.key"},
+			Mounts:       mounts,
 			AttachStdout: true,
 			AttachStderr: true,
 			AttachStdin:  true,
@@ -164,10 +143,10 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 		portBindings[containerPort] = []docker.PortBinding{hostPort}
 	}
 
-	err = DKR.StartContainer(cnt.ID, &docker.HostConfig{
+	err = dkr.StartContainer(cnt.ID, &docker.HostConfig{
 		NetworkMode:  "host",
 		Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
-		CPUShares:    int64(cfg.CpuShares),
+		CPUShares:    int64(cfg.CPUShares),
 		PortBindings: portBindings,
 	})
 	if err != nil {
@@ -176,7 +155,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 	}
 
 	// Attach
-	go DKR.AttachToContainer(docker.AttachToContainerOptions{
+	go dkr.AttachToContainer(docker.AttachToContainerOptions{
 		Container:    cnt.ID,
 		OutputStream: *cfg.logger,
 		ErrorStream:  *cfg.logger,
@@ -188,11 +167,75 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImage bool) (*Spawn
 
 	// Collect statistics
 	statChan := make(chan *docker.Stats)
-	go DKR.Stats(docker.StatsOptions{
+	go dkr.Stats(docker.StatsOptions{
 		ID:     cnt.ID,
 		Stats:  statChan,
 		Stream: true,
 	})
 
 	return &SpawnPointContainer{cnt, cfg.ServiceName, &statChan}, nil
+}
+
+func rebuildImage(cfg *Manifest, imgname string) error {
+	// First remove the old image
+	err := dkr.RemoveImage(imgname)
+	if err != nil && err != docker.ErrNoSuchImage {
+		return err
+	}
+
+	dfile := []string{"FROM immesys/spawnpoint:amd64"}
+	dfile = append(dfile, cfg.Build...)
+
+	tdir, err := ioutil.TempDir("", "spawnpoint")
+	tname := tdir + "/dockerfile"
+	if err != nil {
+		return err
+	}
+	err = ioutil.WriteFile(tname, []byte(strings.Join(dfile, "\n")), 0666)
+	if err != nil {
+		return err
+	}
+
+	err = dkr.BuildImage(docker.BuildImageOptions{
+		Dockerfile:   "dockerfile",
+		OutputStream: os.Stdout,
+		ContextDir:   tdir,
+		Name:         imgname,
+		NoCache:      true,
+		Pull:         true,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func createMounts(svcName string, volumeNames []string) ([]docker.Mount, error) {
+	volumeList, err := dkr.ListVolumes(docker.ListVolumesOptions{})
+	if err != nil {
+		return nil, err
+	}
+	existingVolumes := make(map[string]bool)
+	for _, volume := range volumeList {
+		existingVolumes[volume.Name] = true
+	}
+
+	mounts := make([]docker.Mount, len(volumeNames))
+	for i, volumeName := range volumeNames {
+		fullVolumeName := svcName + "." + volumeName
+		_, ok := existingVolumes[fullVolumeName]
+		if !ok {
+			_, err = dkr.CreateVolume(docker.CreateVolumeOptions{Name: fullVolumeName})
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		mounts[i] = docker.Mount{
+			Name:        fullVolumeName,
+			Destination: "/srv/" + fullVolumeName,
+		}
+	}
+
+	return mounts, nil
 }

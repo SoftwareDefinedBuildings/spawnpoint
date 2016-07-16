@@ -28,10 +28,10 @@ func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName str
 
 func (logger BWLogger) Write(msg []byte) (int, error) {
 	po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLog{
-		time.Now().UnixNano(),
-		logger.spAlias,
-		logger.svcName,
-		string(msg),
+		Time:     time.Now().UnixNano(),
+		SPAlias:  logger.spAlias,
+		Service:  logger.svcName,
+		Contents: string(msg),
 	})
 	if err != nil {
 		return 0, err
