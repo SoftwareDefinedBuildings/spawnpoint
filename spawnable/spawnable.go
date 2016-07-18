@@ -15,11 +15,13 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+// Key value structure representing the paramater file
 type Params struct {
 	dat map[string]interface{}
 }
 
-func GetParams() (p *Params, e error) {
+// Loads parameters from the given YAML file
+func GetParamsFile(filename string) (p *Params, e error) {
 	defer func() {
 		r := recover()
 		if r != nil {
@@ -29,7 +31,7 @@ func GetParams() (p *Params, e error) {
 		}
 	}()
 	params := make(map[string]interface{})
-	in, err := ioutil.ReadFile("params.yml")
+	in, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +64,22 @@ func GetParams() (p *Params, e error) {
 	return &Params{params}, nil
 }
 
+// Loads parameters from the given YAML file or exits
+func GetParamsFileOrExit(filename string) *Params {
+	params, err := GetParamsFile(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not read %s: %v\n", filename, err)
+		os.Exit(1)
+	}
+	return params
+}
+
+// Loads params from YAML file 'params.yml'
+func GetParams() (p *Params, e error) {
+	return GetParamsFile("params.yml")
+}
+
+// Loads params from 'params.yml' or exits
 func GetParamsOrExit() *Params {
 	params, err := GetParams()
 	if err != nil {
