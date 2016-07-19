@@ -459,7 +459,12 @@ func handleConfig(m *bw2.SimpleMessage) {
 		panic(err)
 	}
 
-	buildcontents, err := constructBuildContents(config)
+	fileIncludePo := m.GetOnePODF(bw2.PODFString)
+	var fileIncludeEnc string
+	if fileIncludePo != nil {
+		fileIncludeEnc = string(fileIncludePo.GetContents())
+	}
+	buildcontents, err := constructBuildContents(config, fileIncludeEnc)
 	if err != nil {
 		panic(err)
 	}
@@ -539,7 +544,7 @@ func parseMemAlloc(alloc string) (uint64, error) {
 	return memAlloc, nil
 }
 
-func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
+func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]string, error) {
 	var buildcontents []string
 	next := 0
 	if config.Source != "" {
@@ -557,12 +562,6 @@ func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 		buildcontents = make([]string, len(config.Build)+4)
 	}
 
-	parmsString := ""
-	for k, v := range config.Params {
-		parmsString += k + ": " + v + "\n"
-	}
-	parms64 := base64.StdEncoding.EncodeToString([]byte(parmsString))
-
 	buildcontents[next] = "WORKDIR /srv/spawnpoint"
 	next++
 	buildcontents[next] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
@@ -574,8 +573,13 @@ func constructBuildContents(config *objects.SvcConfig) ([]string, error) {
 		buildcontents[next] = "RUN echo 'no apt-requires'"
 		next++
 	}
-	buildcontents[next] = "RUN echo " + parms64 + " | base64 --decode > params.yml"
-	next++
+
+	if includeTarEnc != "" {
+		buildcontents[next] = "RUN echo " + includeTarEnc + " | base64 --decode > include.tar" +
+			" && tar -xf include.tar"
+		next++
+	}
+
 	for _, b := range config.Build {
 		buildcontents[next] = "RUN " + b
 		next++

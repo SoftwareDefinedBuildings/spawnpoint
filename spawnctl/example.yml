@@ -1,4 +1,3 @@
-{{$base := "jkolb/demo"}}
 alpha:
   demosvc:
     entity: /home/jack/bosswave/keys/jackDev.ent
@@ -6,9 +5,6 @@ alpha:
     source: git+http://github.com/jkolb1/demosvc
     build: [go get -d, go build -o demosvc]
     run: [./demosvc, 100]
-    volumes: [burmecia]
-    params:
-      msg: "Hello, World"
-      to: {{$base}}/out
     memAlloc: 512M
     cpuShares: 1024
+    includedFiles: [params.yml]

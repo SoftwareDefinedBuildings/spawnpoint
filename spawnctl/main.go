@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"text/template"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/uris"
+	"github.com/jhoonb/archivex"
 	"gopkg.in/yaml.v2"
 
 	"github.com/codegangsta/cli"
@@ -84,12 +86,6 @@ func main() {
 				cli.StringFlag{
 					Name:  "config, c",
 					Usage: "a configuration to deploy",
-					Value: "",
-				},
-
-				cli.StringFlag{
-					Name:  "params, p",
-					Usage: "deployment key/value parameter pairs",
 					Value: "",
 				},
 			},
@@ -224,7 +220,6 @@ func printLastSeen(lastSeen time.Time, name string, uri string) {
 		fmt.Printf("[%s%s%s] seen %s%s%s ago\n", ansi.ColorCode("blue+b"),
 			name, ansi.ColorCode("reset"), color, ls, ansi.ColorCode("reset"))
 	}
-
 }
 
 func actionScan(c *cli.Context) error {
@@ -254,7 +249,6 @@ func actionScan(c *cli.Context) error {
 		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
 		fmt.Printf("    Available Memory: %v MB, Available Cpu Shares: %v\n",
 			sp.AvailableMem, sp.AvailableCPUShares)
-
 	}
 
 	if len(spawnPoints) == 1 {
@@ -297,27 +291,7 @@ func parseConfig(filename string) (map[string](map[string]objects.SvcConfig), er
 		return nil, err
 	}
 
-	rv := make(map[string](map[string]objects.SvcConfig))
-	err = yaml.Unmarshal(buf.Bytes(), &rv)
-	if err != nil {
-		return nil, err
-	}
-
-	return rv, nil
-}
-
-func readSvcParamsFromFile(filename string) (map[string](map[string]string), error) {
-	tmp := template.New("root")
-	tmp, err := recParse(tmp, filename)
-	if err != nil {
-		return nil, err
-	}
-
-	buf := bytes.Buffer{}
-	leafName := filename[strings.LastIndex(filename, "/")+1:]
-	err = tmp.ExecuteTemplate(&buf, leafName, struct{}{})
-
-	rv := make(map[string](map[string]string))
+	var rv map[string](map[string]objects.SvcConfig)
 	err = yaml.Unmarshal(buf.Bytes(), &rv)
 	if err != nil {
 		return nil, err
@@ -364,6 +338,51 @@ func taillogs(logs []chan *bw2.SimpleMessage) {
 	}
 }
 
+func createArchiveEncoding(includedDirs []string, includedFiles []string) (string, error) {
+	includedEntities := 0
+	tarFileName := os.TempDir() + "/sp_include.tar"
+	tar := new(archivex.TarFile)
+	tar.Create(tarFileName)
+
+	for _, dirName := range includedDirs {
+		absPath, _ := filepath.Abs(dirName)
+		if _, err := os.Stat(absPath); os.IsNotExist(err) {
+			fmt.Printf("%s[WARN] Directory %s does not exist. Omitting.%s\n",
+				ansi.ColorCode("yellow+b"), absPath, ansi.ColorCode("reset"))
+		} else {
+			tar.AddAll(absPath, false)
+			includedEntities++
+		}
+	}
+
+	for _, fileName := range includedFiles {
+		absPath, _ := filepath.Abs(fileName)
+		if _, err := os.Stat(absPath); os.IsNotExist(err) {
+			fmt.Printf("%s[WARN] File %s does not exist. Omitting.%s\n",
+				ansi.ColorCode("yellow+b"), absPath, ansi.ColorCode("reset"))
+		} else {
+			if err = tar.AddFile(absPath); err != nil {
+				return "", err
+			}
+			includedEntities++
+		}
+	}
+
+	if err := tar.Close(); err != nil {
+		return "", err
+	}
+	//defer os.Remove(tarFileName)
+	if includedEntities == 0 {
+		return "", nil
+	}
+
+	rawBytes, err := ioutil.ReadFile(tarFileName)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(rawBytes), nil
+}
+
 func actionDeploy(c *cli.Context) error {
 	var err error
 	BWClient := InitCon(c)
@@ -388,16 +407,6 @@ func actionDeploy(c *cli.Context) error {
 		return errors.New(msg)
 	}
 
-	paramsName := c.String("params")
-	svcParams := make(map[string](map[string]string))
-	if len(paramsName) != 0 {
-		svcParams, err = readSvcParamsFromFile(paramsName)
-		if err != nil {
-			fmt.Println("Failed to read params from file:", err)
-			return err
-		}
-	}
-
 	spawnpoints, err := scan(baseuri, BWClient)
 	if err != nil {
 		fmt.Println("Initial spawnpoint scan failed:", err)
@@ -413,8 +422,20 @@ func actionDeploy(c *cli.Context) error {
 
 	for spName, svcs := range spDeployments {
 		for svcName, config := range svcs {
+			sp, ok := spawnpoints[spName]
+			if !ok {
+				fmt.Printf("%s[ERR] config references unknown spawnpoint '%s'. Skipping this section.%s\n",
+					ansi.ColorCode("red+b"), spName, ansi.ColorCode("reset"))
+				continue
+			}
+			if !sp.Good() {
+				fmt.Printf("%s[WARN] spawnpoint '%s' appears down. Writing config anyway.%s\n",
+					ansi.ColorCode("yellow+b"), spName, ansi.ColorCode("reset"))
+			}
+
 			config.ServiceName = svcName
-			entityContents, err := ioutil.ReadFile(config.Entity)
+			absEntityPath, _ := filepath.Abs(config.Entity)
+			entityContents, err := ioutil.ReadFile(absEntityPath)
 			if err != nil {
 				msg := fmt.Sprintf("Cannot find entity keyfile '%s'. Aborting", config.Entity)
 				fmt.Println(msg)
@@ -422,28 +443,23 @@ func actionDeploy(c *cli.Context) error {
 			}
 			config.Entity = base64.StdEncoding.EncodeToString(entityContents)
 
-			params, ok := svcParams[svcName]
-			if ok {
-				config.Params = params
-			}
-
-			sp, ok := spawnpoints[spName]
-			if !ok {
-				fmt.Printf("%s[ERR] config references unknown spawnpoint '%s'. Skipping this section.%s\n",
-					ansi.ColorCode("red+b"), spName, ansi.ColorCode("reset"))
-				continue
-			}
-
-			if !sp.Good() {
-				fmt.Printf("%s[WARN] spawnpoint '%s' appears down. Writing config anyway.%s\n",
-					ansi.ColorCode("yellow+b"), spName, ansi.ColorCode("reset"))
-			}
-
-			po, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
+			pos := make([]bw2.PayloadObject, 1)
+			configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
 			if err != nil {
-				msg := "Failed to serialize config for spawnpoint" + spName
+				msg := fmt.Sprintf("Failed to serialize config for %s (%s): %v", svcName, spName, err)
 				fmt.Println(msg)
 				return errors.New(msg)
+			}
+			pos[0] = configPo
+
+			includedArchiveEnc, err := createArchiveEncoding(config.IncludedDirs, config.IncludedFiles)
+			if err != nil {
+				msg := fmt.Sprintf("Failed to serialize included files for %s (%s): %v", svcName, spName, err)
+				fmt.Println(msg)
+				return errors.New(msg)
+			}
+			if includedArchiveEnc != "" {
+				pos = append(pos, bw2.CreateStringPayloadObject(includedArchiveEnc)
 			}
 
 			spawnpointURI := fixuri(sp.URI)
@@ -462,7 +478,7 @@ func actionDeploy(c *cli.Context) error {
 			fmt.Println("publishing cfg to: ", uri)
 			err = BWClient.Publish(&bw2.PublishParams{
 				URI:            uri,
-				PayloadObjects: []bw2.PayloadObject{po},
+				PayloadObjects: pos,
 			})
 			if err != nil {
 				msg := fmt.Sprintf("Failed to publish config: %v", err)
