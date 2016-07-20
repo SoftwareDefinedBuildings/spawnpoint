@@ -79,7 +79,6 @@ func StopContainer(serviceName string) error {
 			fmt.Println("Removing existing container for svc", serviceName)
 			err := dkr.RemoveContainer(docker.RemoveContainerOptions{
 				ID:            containerInfo.Raw.ID,
-				RemoveVolumes: true,
 				Force:         false,
 			})
 			if err != nil {
