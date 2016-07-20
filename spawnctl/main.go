@@ -459,7 +459,7 @@ func actionDeploy(c *cli.Context) error {
 				return errors.New(msg)
 			}
 			if includedArchiveEnc != "" {
-				pos = append(pos, bw2.CreateStringPayloadObject(includedArchiveEnc)
+				pos = append(pos, bw2.CreateStringPayloadObject(includedArchiveEnc))
 			}
 
 			spawnpointURI := fixuri(sp.URI)
