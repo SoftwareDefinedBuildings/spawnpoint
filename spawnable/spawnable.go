@@ -1,3 +1,42 @@
+/*
+This is a convenience package for supplying configuration parameters and applying metadata
+to a BOSSWAVE driver which provides services and interfaces.
+
+The following keys are expected and used by spawnable:
+  - svc_base_uri: the full BOSSWAVE URI prefix for where this driver will be deployed
+  - metadata: tiered map of key-value pairs to be applied to
+    different levels in the driver URI hierarchy
+  - metavalid: string formatted like "2006-01-02T15:04:05 MST" specifying when the metadata was
+    considered valid
+
+Metadata
+
+Metadata in spawnable is applied as a set of key-value pairs persisted at some URI. The URIs
+specified in the file are relative to `svc_base_uri`.
+
+Example:
+	# params.yml
+	metadata:
+		- s.servicename:
+			- key1: value1
+			- key2: value2
+		- s.servicename/instance:
+			- key3: value3
+		- s.servicename/instance/i.name:
+			- key4: value4
+			- key5: value5
+
+If `svc_base_uri` was `scratch.ns/services`, then metadata would be placed at the following URIs:
+
+	scratch.ns/services/s.servicename/!meta/key1
+	scratch.ns/services/s.servicename/!meta/key2
+	scratch.ns/services/s.servicename/instance/!meta/key3
+	scratch.ns/services/s.servicename/instance/i.name/!meta/key4
+	scratch.ns/services/s.servicename/instance/i.name/!meta/key5
+
+Inheritance of this metadata is dictated by the semantics of the BOSSWAVE query tool, which will
+"trickle down" metadata from prefixes to the longer URIs.
+*/
 package spawnable
 
 import (
@@ -8,18 +47,17 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"time"
-
-	"gopkg.in/immesys/bw2bind.v5"
 
 	yaml "gopkg.in/yaml.v2"
 )
 
+// Key value structure representing the paramater file
 type Params struct {
 	dat map[string]interface{}
 }
 
-func GetParams() (p *Params, e error) {
+// Loads parameters from the given YAML file
+func GetParamsFile(filename string) (p *Params, e error) {
 	defer func() {
 		r := recover()
 		if r != nil {
@@ -29,7 +67,7 @@ func GetParams() (p *Params, e error) {
 		}
 	}()
 	params := make(map[string]interface{})
-	in, err := ioutil.ReadFile("params.yml")
+	in, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +100,22 @@ func GetParams() (p *Params, e error) {
 	return &Params{params}, nil
 }
 
+// Loads parameters from the given YAML file or exits
+func GetParamsFileOrExit(filename string) *Params {
+	params, err := GetParamsFile(filename)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not read %s: %v\n", filename, err)
+		os.Exit(1)
+	}
+	return params
+}
+
+// Loads params from YAML file 'params.yml'
+func GetParams() (p *Params, e error) {
+	return GetParamsFile("params.yml")
+}
+
+// Loads params from 'params.yml' or exits
 func GetParamsOrExit() *Params {
 	params, err := GetParams()
 	if err != nil {
@@ -87,95 +141,6 @@ func (p *Params) GetEntity() (blob []byte, err error) {
 		return nil, err
 	}
 	return eblob, nil
-}
-
-const tsFMT = "2006-01-02T15:04:05 MST"
-
-type MetaTuple struct {
-	Val string `yaml:"val"`
-	TS  string `yaml:"ts"`
-	key string
-}
-
-func (mt *MetaTuple) NewerThan(t time.Time) bool {
-	mttime, err := time.Parse(tsFMT, mt.TS)
-	if err != nil {
-		fmt.Println("BAD METADATA TIME TAG: ", err)
-		return false
-	}
-	return mttime.After(t)
-}
-
-func (p *Params) MergeMetadata(cl *bw2bind.BW2Client) {
-	metavalidI, haveValid := p.dat["metavalid"]
-	vtime := time.Now()
-	if haveValid {
-		metavalidS := metavalidI.(string)
-		var err error
-		vtime, err = time.Parse(time.UnixDate, metavalidS)
-		if err != nil {
-			fmt.Println("Error parsing valid time:", err)
-			os.Exit(1)
-		}
-	}
-	ourtuples := []*MetaTuple{}
-	for ki, vi := range p.dat["metadata"].(map[interface{}]interface{}) {
-		k := ki.(string)
-		v := vi.(string)
-		mt := &MetaTuple{Val: v, TS: vtime.Format(tsFMT), key: k}
-		ourtuples = append(ourtuples, mt)
-	}
-
-	doTuple := func(tgt string, mt *MetaTuple) {
-		mttime, err := time.Parse(tsFMT, mt.TS)
-		if err != nil {
-			fmt.Println("Metadata tag has bad timestamp:", tgt)
-			return
-		}
-		ex_metadata, err := cl.QueryOne(&bw2bind.QueryParams{
-			URI:       tgt,
-			AutoChain: true,
-		})
-		if err != nil {
-			fmt.Println("Could not query metadata: ", err)
-			return
-		}
-		if ex_metadata != nil {
-			entry, ok := ex_metadata.GetOnePODF(bw2bind.PODFSMetadata).(bw2bind.MsgPackPayloadObject)
-			if ok {
-				obj := bw2bind.MetadataTuple{}
-				entry.ValueInto(&obj)
-				if !mt.NewerThan(obj.Time()) {
-					fmt.Println("Existing metadata is same/newer for: ", tgt)
-					return
-				}
-			}
-		}
-		po, err := bw2bind.CreateMsgPackPayloadObject(bw2bind.PONumSMetadata, &bw2bind.MetadataTuple{
-			Value:     mt.Val,
-			Timestamp: mttime.UnixNano(),
-		})
-		if err != nil {
-			fmt.Println("Could not create PO: ", err)
-		}
-
-		err = cl.Publish(&bw2bind.PublishParams{
-			URI:            tgt,
-			PayloadObjects: []bw2bind.PayloadObject{po},
-			Persist:        true,
-			AutoChain:      true,
-		})
-		if err != nil {
-			fmt.Println("Unable to update metadata: ", err)
-		} else {
-			fmt.Printf("set %s to %v @(%s)\n", tgt, mt.Val, mt.TS)
-		}
-	}
-
-	for _, mt := range ourtuples {
-		tgt := p.MustString("svc_base_uri") + "!meta/" + mt.key
-		doTuple(tgt, mt)
-	}
 }
 
 func (p *Params) GetEntityOrExit() (blob []byte) {
