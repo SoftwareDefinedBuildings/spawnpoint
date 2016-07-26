@@ -147,6 +147,11 @@ The valid parameters currently are:
 * `autoRestart` (optional): A boolean specifying if this service's container
   should be automatically restarted upon termination. Defaults to `false`.
 
+* `restartInt` (optional): If `autoRestart` is enabled, this specifies the
+  amount of time wait after a service has terminated before attempting a
+  restart. The normal Go duration syntax is used. For example, a value of "30s"
+  signifies a 30-second delay, while a value of "5m" signifies a 5-minute delay.  
+
 * `includedFiles` (optional): A list of paths to files that are to be included
   in the container. All files, regardless of their location on the machine from
   which `spawnctl` is invoked, will be placed in the current working directory

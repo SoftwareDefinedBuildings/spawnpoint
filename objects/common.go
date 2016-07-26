@@ -27,6 +27,7 @@ type SvcConfig struct {
 	IncludedFiles []string `yaml:"includedFiles,omitempty"`
 	IncludedDirs  []string `yaml:"includedDirs,omitempty"`
 	AutoRestart   bool     `yaml:"autoRestart"`
+	RestartInt    string   `yaml:"restartInt,omitempty"`
 }
 
 type SpawnPoint struct {

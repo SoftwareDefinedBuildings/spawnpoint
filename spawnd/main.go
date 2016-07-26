@@ -469,6 +469,14 @@ func handleConfig(m *bw2.SimpleMessage) {
 		panic(err)
 	}
 
+	var restartWaitDur time.Duration
+	if config.RestartInt != "" {
+		restartWaitDur, err = time.ParseDuration(config.RestartInt)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	// Previous version of service could already be running
 	runningSvcsLock.Lock()
 	existingManifest, ok := runningServices[config.ServiceName]
@@ -517,6 +525,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		Build:         buildcontents,
 		Run:           config.Run,
 		AutoRestart:   config.AutoRestart,
+		RestartInt:    restartWaitDur,
 		Volumes:       config.Volumes,
 		logger:        logger,
 	}
@@ -597,21 +606,33 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 					olog <- SLM{name, "Container stopped"}
 
 					if manifest.AutoRestart {
-						cnt, err := RestartContainer(manifest, cfg.LocalRouter, false)
-						if err != nil {
-							olog <- SLM{name, "Auto restart failed"}
-							fmt.Println("ERROR IN CONTAINER: ", err)
-							delete(runningServices, name)
-							availLock.Lock()
-							availableCPUShares += int64(manifest.CPUShares)
-							availableMem += int64(manifest.MemAlloc)
-							availLock.Unlock()
-						} else {
-							olog <- SLM{name, "Auto restart successful!"}
-							fmt.Println("Container restart ok")
-							manifest.Container = cnt
-							go svcHeartbeat(manifest.ServiceName, cnt.StatChan)
-						}
+						go func() {
+							if manifest.RestartInt > 0 {
+								time.Sleep(manifest.RestartInt)
+							}
+							cnt, err := RestartContainer(manifest, cfg.LocalRouter, false)
+							if err != nil {
+								msg := fmt.Sprintf("Service auto restart failed: %+v", err)
+								olog <- SLM{name, msg}
+								fmt.Println(msg)
+
+								runningSvcsLock.Lock()
+								delete(runningServices, name)
+								runningSvcsLock.Unlock()
+
+								availLock.Lock()
+								availableCPUShares += int64(manifest.CPUShares)
+								availableMem += int64(manifest.MemAlloc)
+								availLock.Unlock()
+
+							} else {
+								olog <- SLM{name, "Auto restart successful!"}
+								fmt.Println("Container restart ok")
+								// Pointer directly to manifest, don't need to worry about locks
+								manifest.Container = cnt
+								go svcHeartbeat(manifest.ServiceName, cnt.StatChan)
+							}
+						}()
 					} else {
 						delete(runningServices, name)
 						// Still need to update memory and cpu availability

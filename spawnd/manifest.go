@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 type Manifest struct {
 	ServiceName   string
 	Entity        []byte
@@ -9,6 +11,7 @@ type Manifest struct {
 	Build         []string
 	Run           []string
 	AutoRestart   bool
+	RestartInt    time.Duration
 	Container     *SpawnPointContainer
 	Volumes       []string
 	logger        *BWLogger
