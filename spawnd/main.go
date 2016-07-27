@@ -14,6 +14,7 @@ import (
 	"github.com/codegangsta/cli"
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/uris"
+	"gopkg.in/vmihailenco/msgpack.v2"
 
 	docker "github.com/fsouza/go-dockerclient"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
@@ -43,6 +44,10 @@ var svcSpawnCh chan *Manifest
 var eventCh chan *docker.APIEvents
 
 const HeartbeatPeriod = 5
+const (
+	persistFileName = ".spawnd_svcs"
+	writeFilePeriod = 10
+)
 
 type SLM struct {
 	Service string
@@ -140,6 +145,10 @@ func actionRun(c *cli.Context) {
 	}
 	go monitorDockerEvents(&eventCh)
 
+	// If possible, recover state from persistence file
+	runningServices = make(map[string]*Manifest)
+	recoverPreviousState()
+
 	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "config")})
 	if err != nil {
 		fmt.Println("Could not subscribe to config URI: ", err)
@@ -161,8 +170,8 @@ func actionRun(c *cli.Context) {
 	go doOlog()
 	go heartbeat()
 	go doSvcSpawn()
+	go writePersistenceFile()
 	fmt.Println("spawnpoint active")
-
 	for {
 		select {
 		case ncfg := <-newconfigs:
@@ -511,11 +520,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		stopService(config.ServiceName)
 	}
 
-	logger, err := NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName)
-	if err != nil {
-		panic(err)
-	}
-
+	logger := NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName)
 	mf := Manifest{
 		ServiceName:   config.ServiceName,
 		Entity:        econtents,
@@ -602,6 +607,8 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 		if event.Action == "die" {
 			runningSvcsLock.Lock()
 			for name, manifest := range runningServices {
+				// Need to shadow to avoid loop reference variable bug
+				manifest := manifest
 				if manifest.Container.Raw.ID == event.Actor.ID {
 					olog <- SLM{name, "Container stopped"}
 
@@ -675,4 +682,103 @@ func doSvcSpawn() {
 			go svcHeartbeat(manifest.ServiceName, manifest.Container.StatChan)
 		}
 	}
+}
+
+func writePersistenceFile() {
+	for {
+		manifests := make([]Manifest, len(runningServices))
+		i := 0
+
+		runningSvcsLock.Lock()
+		for _, mfstPtr := range runningServices {
+			// Make a deep copy
+			manifests[i] = Manifest{
+				ServiceName:   mfstPtr.ServiceName,
+				Entity:        mfstPtr.Entity,
+				ContainerType: mfstPtr.ContainerType,
+				MemAlloc:      mfstPtr.MemAlloc,
+				CPUShares:     mfstPtr.CPUShares,
+				Build:         mfstPtr.Build,
+				Run:           mfstPtr.Run,
+				AutoRestart:   mfstPtr.AutoRestart,
+				RestartInt:    mfstPtr.RestartInt,
+				Volumes:       mfstPtr.Volumes,
+			}
+		}
+		runningSvcsLock.Unlock()
+
+		rawBytes, err := msgpack.Marshal(manifests)
+		if err != nil {
+			fmt.Printf("Failed to serialize for persistence file: %v\n", err)
+		} else if err = ioutil.WriteFile(persistFileName, rawBytes, 0600); err != nil {
+			fmt.Printf("Failed to write to persistence file: %v\n", err)
+		}
+
+		time.Sleep(writeFilePeriod * time.Second)
+	}
+}
+
+func recoverPreviousState() {
+	rawBytes, err := ioutil.ReadFile(persistFileName)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Printf("Failed to read from persistence file: %v\n", err)
+		}
+		return
+	}
+
+	var priorManifests []Manifest
+	if err = msgpack.Unmarshal(rawBytes, &priorManifests); err != nil {
+		fmt.Printf("Failed to deserialize persistence data: %v\n", err)
+		return
+	}
+
+	knownContainers, err := GetSpawnedContainers()
+	if err != nil {
+		fmt.Printf("Failed to retrieve container info: %v\n", err)
+	}
+
+	// Note that we do not have to worry about memory or CPU consumption
+	// Previously running instance of spawnd enforced limits for us
+	newManifests := make(map[string]*Manifest)
+	for _, mfst := range priorManifests {
+		containerInfo, ok := knownContainers[mfst.ServiceName]
+		if ok {
+			logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
+			mfst.logger = logger
+			if containerInfo.Raw.State.Running {
+				// Container continued running after spawnd terminated, reclaim ownership
+				AttachLogger(containerInfo.Raw, logger)
+				statChan := CollectStats(containerInfo.Raw)
+				mfst.Container = &SpawnPointContainer{containerInfo.Raw, mfst.ServiceName, statChan}
+				newManifests[mfst.ServiceName] = &mfst
+				go svcHeartbeat(mfst.ServiceName, statChan)
+
+				availLock.Lock()
+				availableMem -= int64(mfst.MemAlloc)
+				availableCPUShares -= int64(mfst.CPUShares)
+				availLock.Unlock()
+
+			} else if mfst.AutoRestart {
+				// Container has stopped, so try to restart it
+				spCnt, err := RestartContainer(&mfst, cfg.LocalRouter, false)
+				if err != nil {
+					fmt.Printf("Failed to restart previously running contianer: %v\n", err)
+				} else {
+					mfst.Container = spCnt
+					newManifests[mfst.ServiceName] = &mfst
+					go svcHeartbeat(mfst.ServiceName, spCnt.StatChan)
+
+					availLock.Lock()
+					availableMem -= int64(mfst.MemAlloc)
+					availableCPUShares -= int64(mfst.CPUShares)
+					availLock.Unlock()
+				}
+			}
+		}
+	}
+
+	runningSvcsLock.Lock()
+	runningServices = newManifests
+	runningSvcsLock.Unlock()
 }

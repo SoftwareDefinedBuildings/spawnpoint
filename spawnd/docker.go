@@ -31,7 +31,7 @@ func ConnectDocker() (chan *docker.APIEvents, error) {
 	return evChan, err
 }
 
-func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
+func GetSpawnedContainers() (map[string]*SpawnPointContainer, error) {
 	rawrv, err := dkr.ListContainers(docker.ListContainersOptions{
 		All: true,
 	})
@@ -39,7 +39,7 @@ func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
 		return nil, err
 	}
 
-	var rv []*SpawnPointContainer
+	rv := make(map[string]*SpawnPointContainer)
 	for _, containerInfo := range rawrv {
 		for _, name := range containerInfo.Names {
 			if strings.HasPrefix(name, "/spawnpoint_") {
@@ -48,10 +48,11 @@ func GetSpawnedContainers() ([]*SpawnPointContainer, error) {
 					return nil, err
 				}
 
-				rv = append(rv, &SpawnPointContainer{
+				svcName := name[len("/spawnpoint_"):]
+				rv[svcName] = &SpawnPointContainer{
 					Raw:         container,
-					ServiceName: name[len("/spawnpoint_"):],
-				})
+					ServiceName: svcName,
+				}
 				break
 			}
 		}
@@ -66,8 +67,8 @@ func StopContainer(serviceName string) error {
 		return err
 	}
 
-	for _, containerInfo := range curContainers {
-		if containerInfo.ServiceName == serviceName {
+	for name, containerInfo := range curContainers {
+		if name == serviceName {
 			fmt.Println("Found existing container for service, deleting")
 			if containerInfo.Raw.State.Running {
 				err := dkr.StopContainer(containerInfo.Raw.ID, timeoutLen)
@@ -78,8 +79,8 @@ func StopContainer(serviceName string) error {
 
 			fmt.Println("Removing existing container for svc", serviceName)
 			err := dkr.RemoveContainer(docker.RemoveContainerOptions{
-				ID:            containerInfo.Raw.ID,
-				Force:         false,
+				ID:    containerInfo.Raw.ID,
+				Force: false,
 			})
 			if err != nil {
 				return err
@@ -153,26 +154,10 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 		return nil, err
 	}
 
-	// Attach
-	go dkr.AttachToContainer(docker.AttachToContainerOptions{
-		Container:    cnt.ID,
-		OutputStream: *cfg.logger,
-		ErrorStream:  *cfg.logger,
-		Logs:         true,
-		Stdout:       true,
-		Stderr:       true,
-		Stream:       true,
-	})
+	AttachLogger(cnt, cfg.logger)
+	statChan := CollectStats(cnt)
 
-	// Collect statistics
-	statChan := make(chan *docker.Stats)
-	go dkr.Stats(docker.StatsOptions{
-		ID:     cnt.ID,
-		Stats:  statChan,
-		Stream: true,
-	})
-
-	return &SpawnPointContainer{cnt, cfg.ServiceName, &statChan}, nil
+	return &SpawnPointContainer{cnt, cfg.ServiceName, statChan}, nil
 }
 
 func rebuildImage(cfg *Manifest, imgname string) error {
@@ -237,4 +222,27 @@ func createMounts(svcName string, volumeNames []string) ([]docker.Mount, error) 
 	}
 
 	return mounts, nil
+}
+
+func AttachLogger(container *docker.Container, logger *BWLogger) {
+	go dkr.AttachToContainer(docker.AttachToContainerOptions{
+		Container:    container.ID,
+		OutputStream: logger,
+		ErrorStream:  logger,
+		Logs:         true,
+		Stdout:       true,
+		Stderr:       true,
+		Stream:       true,
+	})
+}
+
+func CollectStats(container *docker.Container) *chan (*docker.Stats) {
+	statChan := make(chan *docker.Stats)
+	go dkr.Stats(docker.StatsOptions{
+		ID:     container.ID,
+		Stats:  statChan,
+		Stream: true,
+	})
+
+	return &statChan
 }

@@ -15,7 +15,7 @@ type BWLogger struct {
 	uri      string
 }
 
-func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName string) (*BWLogger, error) {
+func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName string) *BWLogger {
 	logger := BWLogger{
 		bwClient,
 		spAlias,
@@ -23,7 +23,7 @@ func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName str
 		uris.ServiceSignalPath(base, svcName, "log"),
 	}
 
-	return &logger, nil
+	return &logger
 }
 
 func (logger BWLogger) Write(msg []byte) (int, error) {
