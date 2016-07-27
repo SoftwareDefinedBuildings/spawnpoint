@@ -1,10 +1,8 @@
-alpha:
-  demosvc:
-    entity: /home/jack/bosswave/keys/jackDev.ent
-    container: immesys/spawnpoint:amd64
-    source: git+http://github.com/jkolb1/demosvc
-    build: [go get -d, go build -o demosvc]
-    run: [./demosvc, 100]
-    memAlloc: 512M
-    cpuShares: 1024
-    includedFiles: [params.yml]
+  entity: /home/jack/bosswave/keys/jackDev.ent
+  container: immesys/spawnpoint:amd64
+  source: git+http://github.com/jkolb1/demosvc
+  build: [go get -d, go build -o demosvc]
+  run: [./demosvc, 100]
+  memAlloc: 512M
+  cpuShares: 1024
+  includedFiles: [params.yml]

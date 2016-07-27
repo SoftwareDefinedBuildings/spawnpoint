@@ -86,8 +86,8 @@ flag.
 Use the `scan` command to discover all Spawnpoints with paths that begin with a
 common base URI. For example:
 ```
-$ ./spawnctl scan -u scratch.ns/spawnpoint
-<snip> [Info] Connected to BOSSWAVE router version 2.2.2 - 'Fermion'
+$ spawnctl scan -u scratch.ns/spawnpoint
+<snip> [Info] Connected to BOSSWAVE router version 2.4.7 - 'Fermion'
 Discovered 2 SpawnPoints:
 [beta] seen 24 May 16 23:39 PDT (189h30m36.428869615s) ago at <snip>/spawnpoint/beta
     Available Memory: 16384 MB, Available Cpu Shares: 8192
@@ -98,8 +98,8 @@ Discovered 2 SpawnPoints:
 If your scan only matches one Spawnpoint, information about the services running
 on that Spawnpoint will be automatically printed out. For example:
 ```
-$ ./spawnctl scan -u scratch.ns/spawnpoint/alpha
-<snip> [Info] Connected to BOSSWAVE router version 2.2.2 - 'Fermion'
+$ spawnctl scan -u scratch.ns/spawnpoint/alpha
+<snip> [Info] Connected to BOSSWAVE router version 2.4.7 - 'Hadron'
 Discovered 1 SpawnPoint:
 [alpha] seen 01 Jun 16 12:19 PDT (8h55m12.820928399s) ago at <snip>/spawnpoint/alpha
     Available Memory: 4096 MB, Available Cpu Shares: 4096
@@ -108,6 +108,20 @@ Discovered 1 SpawnPoint:
 ```
 
 ### Deploying a Service
+Use the `deploy` command to install a new service on a particular Spawnpoint.
+You must specify the Bosswave URI for the Spawnpoint, a configuration file that
+is used to initialize the service, and a name for the new service. For example,
+to run a service named `demoservice`, with a configuration specified in the file
+`deploy.yml` (more on this below), on `scratch.ns/spawnpoint/alpha`:
+```
+$ spawnctl deploy -u scratch.ns/spawnpoint/alpha -c deploy.yml -n demosvc
+<snip> [Info] Connected to BOSSWAVE router version 2.4.7 - 'Hadron'
+ !! FINISHED DEPLOYMENT, TAILING LOGS. CTRL-C TO QUIT !!
+...
+```
+After the service is deployed to Spawnpoint, log messages concerning the service
+will appear on screen until the user presses `<CTRL>-C`.
+
 #### Creating a Service Configuration
 Like the Spawnpoint daemon, each service that runs on Spawnpoint can be
 configured by writing a YAML file containing a sequence of key/value parameters.
@@ -168,27 +182,19 @@ The valid parameters currently are:
   will be available to code running in the container as `/srv/foo`. This is
   intended as a means of preserving data between invocations of a service.
 
-One or more related service configurations are then combined together into a
-single YAML file, containing a sequence of key/value pairs. Each key is an alias
-for an existing Spawnpoint, while each value is a configuration for a service to
-be run on that Spawnpoint.
-
-For example, to run [demosvc](https://github.com/jkolb1/demosvc) on a Spawnpoint
-with alias `alpha`, the following configuration could be used.
+For example, to run [demosvc](https://github.com/jkolb1/demosvc), the following
+configuration could be used.
 
 ```yaml
-{{$base := "jkolb/demo"}}
-alpha:
-  demosvc:
-    entity: ~/bosswave/spawnpointTest.key
-    container: immesys/spawnpoint:amd64
-    build: [go get github.com/jkolb1/demosvc]
-    run: [demosvc, 100]
-    memAlloc: 512M
-    cpuShares: 1024
-    autoRestart: true
-    includedFiles: [params.yml]
-    volumes: [foo, bar]
+entity: ~/bosswave/spawnpointTest.key
+container: immesys/spawnpoint:amd64
+build: [go get github.com/jkolb1/demosvc]
+run: [demosvc, 100]
+memAlloc: 512M
+cpuShares: 1024
+autoRestart: true
+includedFiles: [params.yml]
+volumes: [foo, bar]
 ```
 
 #### Service Parameters
@@ -199,22 +205,6 @@ fields. However, support for parsing a YAML file containing a sequence of
 key/value attribute pairs is still supported by the `spawnable` library through
 the `GetParams` function and its relatives.
 
-#### Installing the Service at a Spawnpoint
-Use the `deploy` command to install and run services according to a particular
-configuration at one or more spawnpoints. For example, if we want to use the
-above configuration file, named `config.yml`, for our deployment:
-
-```
-$ spawnctl deploy -u scratch.ns/spawnpoint -c example.yml
-<snip> [Info] Connected to BOSSWAVE router version 2.2.2 - 'Fermion'
- !! FINISHED DEPLOYMENT, TAILING LOGS. CTRL-C TO QUIT !!
-...
-```
-
-After configurations have been deployed to the relevant Spawnpoint instances,
-log messages from those Spawnpoints concerning these services will appear
-on the screen until the user presses `<CTRL>-C`.
-
 ### Restarting/Stopping a Service
 To restart or stop a service, you must know the base URI of the Spawnpoint on
 which it is running as well as its human readable name. To restart the service
@@ -222,7 +212,7 @@ which it is running as well as its human readable name. To restart the service
 
 ```
 $ ./spawnctl restart -u scratch.ns/spawnpoint/alpha -n demosvc
-<snip> [Info] Connected to BOSSWAVE router version 2.2.2 - 'Fermion'
+<snip> [Info] Connected to BOSSWAVE router version 2.4.7 - 'Hadron'
 Monitoring log URI scratch.ns/spawnpoint/gamma/s.spawnpoint/demosvc/i.spawnable/signal/log. Ctrl-C to quit
 [06/01 22:01:46] gamma::demosvc > attempting restart
 ...
