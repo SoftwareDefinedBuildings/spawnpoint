@@ -21,6 +21,8 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+const SpawnDVersion = "0.1.1"
+
 var bwClient *bw2.BW2Client
 var cfg *DaemonConfig
 var olog chan SLM
@@ -55,7 +57,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "spawnd"
 	app.Usage = "Run a Spawnpoint Daemon"
-	app.Version = "0.1"
+	app.Version = SpawnDVersion
 
 	app.Commands = []cli.Command{
 		{
@@ -153,7 +155,7 @@ func actionRun(c *cli.Context) error {
 	go doOlog()
 	go heartbeat()
 	go writePersistenceFile()
-	fmt.Println("spawnpoint active")
+	fmt.Println("Spawnpoint Daemon - Version", SpawnDVersion)
 
 	for {
 		select {
