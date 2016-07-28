@@ -22,7 +22,6 @@ import (
 )
 
 var bwClient *bw2.BW2Client
-var primaryAccessChain string
 var cfg *DaemonConfig
 var olog chan SLM
 
@@ -38,8 +37,6 @@ var (
 	runningServices map[string]*Manifest
 	runningSvcsLock sync.Mutex
 )
-
-var svcSpawnCh chan *Manifest
 
 var eventCh chan *docker.APIEvents
 
@@ -58,7 +55,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "spawnd"
 	app.Usage = "Run a Spawnpoint Daemon"
-	app.Version = "0.0.2"
+	app.Version = "0.1"
 
 	app.Commands = []cli.Command{
 		{
@@ -84,12 +81,12 @@ func readConfigFromFile(fileName string) (*DaemonConfig, error) {
 		return nil, err
 	}
 
-	config := &DaemonConfig{}
-	err = yaml.Unmarshal(configContents, config)
+	config := DaemonConfig{}
+	err = yaml.Unmarshal(configContents, &config)
 	if err != nil {
 		return nil, err
 	}
-	return config, nil
+	return &config, nil
 }
 
 func initializeBosswave() (*bw2.BW2Client, error) {
@@ -97,7 +94,6 @@ func initializeBosswave() (*bw2.BW2Client, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	_, err = client.SetEntityFile(cfg.Entity)
 	if err != nil {
 		return nil, err
@@ -107,16 +103,16 @@ func initializeBosswave() (*bw2.BW2Client, error) {
 	return client, nil
 }
 
-func actionRun(c *cli.Context) {
+func actionRun(c *cli.Context) error {
 	runningServices = make(map[string]*Manifest)
-	svcSpawnCh = make(chan *Manifest, 20)
 	olog = make(chan SLM, 100)
 
 	var err error
 	cfg, err = readConfigFromFile(c.String("config"))
 	if err != nil {
-		fmt.Println("Config file error:", err)
-		os.Exit(1)
+		msg := "Config file error: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	totalCPUShares = cfg.CPUShares
@@ -124,24 +120,25 @@ func actionRun(c *cli.Context) {
 	rawMem := cfg.MemAlloc
 	totalMem, err = parseMemAlloc(rawMem)
 	if err != nil {
-		fmt.Println("Invalid Spawnpoint memory allocation:", err)
-		os.Exit(1)
+		msg := "Invalid Spawnpoint memory allocation: " + rawMem
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 	availableMem = int64(totalMem)
 
 	bwClient, err = initializeBosswave()
 	if err != nil {
-		fmt.Println("Failed to connect to Bosswave router and establish permissions:", err)
-		os.Exit(1)
-	} else {
-		fmt.Println("Successfully connected to router")
+		msg := "Failed to initialize Bosswave router: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 
 	// Start docker connection
 	eventCh, err = ConnectDocker()
 	if err != nil {
-		fmt.Println("Could not connect to Docker:", err)
-		os.Exit(1)
+		msg := "Failed to connect to Docker: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
 	}
 	go monitorDockerEvents(&eventCh)
 
@@ -149,114 +146,62 @@ func actionRun(c *cli.Context) {
 	runningServices = make(map[string]*Manifest)
 	recoverPreviousState()
 
-	newconfigs, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "config")})
-	if err != nil {
-		fmt.Println("Could not subscribe to config URI: ", err)
-		os.Exit(1)
-	}
-
-	restart, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "restart")})
-	if err != nil {
-		fmt.Println("Could not subscribe to restart URI: ", err)
-		os.Exit(1)
-	}
-
-	stop, err := bwClient.Subscribe(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "stop")})
-	if err != nil {
-		fmt.Println("Could not subscribe to stop URI: ", err)
-		os.Exit(1)
-	}
+	newCfgCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "config")})
+	restartCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "restart")})
+	stopCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "stop")})
 
 	go doOlog()
 	go heartbeat()
-	go doSvcSpawn()
 	go writePersistenceFile()
 	fmt.Println("spawnpoint active")
+
 	for {
 		select {
-		case ncfg := <-newconfigs:
-			handleConfig(ncfg)
+		case cfg := <-newCfgCh:
+			handleConfig(cfg)
 
-		case r := <-restart:
-			svcName := ""
-			for _, po := range r.POs {
-				if po.IsTypeDF(bw2.PODFString) {
-					svcName = string(po.GetContents())
+		case restartMsg := <-restartCh:
+			namePo := restartMsg.GetOnePODF(bw2.PODFString)
+			if namePo != nil {
+				runningSvcsLock.Lock()
+				mfst, ok := runningServices[string(namePo.GetContents())]
+				runningSvcsLock.Unlock()
+
+				if ok {
+					if mfst.AutoRestart {
+						// Stop the container and let auto restart do the work for us
+						StopContainer(mfst.ServiceName, false)
+					} else {
+						go restartService(mfst, false)
+					}
 				}
 			}
 
-			if svcName != "" {
-				restartService(svcName)
-			} else {
-				respawn()
-			}
-
-		case s := <-stop:
-			svcName := ""
-			for _, po := range s.POs {
-				if po.IsTypeDF(bw2.PODFString) {
-					svcName = string(po.GetContents())
-				}
-			}
-
-			if svcName != "" {
-				stopService(svcName)
+		case stopMsg := <-stopCh:
+			namePo := stopMsg.GetOnePODF(bw2.PODFString)
+			if namePo != nil {
+				stopService(string(namePo.GetContents()))
 			}
 		}
-	}
-}
-
-func PubLog(svcname string, POs []bw2.PayloadObject) {
-	err := bwClient.Publish(&bw2.PublishParams{
-		URI:            uris.ServiceSignalPath(cfg.Path, svcname, "log"),
-		PayloadObjects: POs,
-	})
-	if err != nil {
-		fmt.Println("Error publishing log: ", err)
 	}
 }
 
 func doOlog() {
-	for {
-		POs := make(map[string][]bw2.PayloadObject)
-		msg := <-olog
-		po1, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog,
-			objects.SPLog{
-				Time:     time.Now().UnixNano(),
-				SPAlias:  cfg.Alias,
-				Service:  msg.Service,
-				Contents: msg.Message,
-			})
+	for msg := range olog {
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLog{
+			Time:     time.Now().UnixNano(),
+			SPAlias:  cfg.Alias,
+			Service:  msg.Service,
+			Contents: msg.Message,
+		})
 		if err != nil {
 			panic(err)
 		}
-		POs[msg.Service] = []bw2.PayloadObject{po1}
 
-		//Opportunistically add another few messages if they are in the channel
-		for i := 0; i < len(olog); i++ {
-			msgN := <-olog
-			poN, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog,
-				objects.SPLog{
-					Time:     time.Now().UnixNano(),
-					SPAlias:  cfg.Alias,
-					Service:  msgN.Service,
-					Contents: msgN.Message,
-				})
-			if err != nil {
-				panic(err)
-			}
-
-			exslice, ok := POs[msgN.Service]
-			if ok {
-				POs[msgN.Service] = append(exslice, poN)
-			} else {
-				POs[msgN.Service] = []bw2.PayloadObject{poN}
-			}
-		}
-
-		for svc, poslice := range POs {
-			PubLog(svc, poslice)
-		}
+		bwClient.PublishOrExit(&bw2.PublishParams{
+			URI:            uris.ServiceSignalPath(cfg.Path, msg.Service, "log"),
+			PayloadObjects: []bw2.PayloadObject{po},
+		})
 	}
 }
 
@@ -268,7 +213,7 @@ func heartbeat() {
 		shares := availableCPUShares
 		availLock.Unlock()
 
-		fmt.Printf("mem: %v, shares: %v\n", mem, shares)
+		fmt.Printf("Memory: %v, CPU Shares: %v\n", mem, shares)
 		msg := objects.SpawnPointHb{
 			Alias:              cfg.Alias,
 			Time:               time.Now().UnixNano(),
@@ -279,19 +224,14 @@ func heartbeat() {
 		}
 		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, msg)
 		if err != nil {
-			fmt.Println("Failed to create spawnpoint heartbeat message")
-			time.Sleep(HeartbeatPeriod * time.Second)
-			continue
-		}
-
-		hburi := uris.SignalPath(cfg.Path, "heartbeat")
-		err = bwClient.Publish(&bw2.PublishParams{
-			URI:            hburi,
-			Persist:        true,
-			PayloadObjects: []bw2.PayloadObject{po},
-		})
-		if err != nil {
-			fmt.Println("Failed to publish spawnpoint heartbeat message")
+			panic(err)
+		} else {
+			hburi := uris.SignalPath(cfg.Path, "heartbeat")
+			bwClient.PublishOrExit(&bw2.PublishParams{
+				URI:            hburi,
+				Persist:        true,
+				PayloadObjects: []bw2.PayloadObject{po},
+			})
 		}
 
 		time.Sleep(HeartbeatPeriod * time.Second)
@@ -349,63 +289,59 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 
 			po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
 			if err != nil {
-				fmt.Println("Failed to create heartbeat message for service ", svcname)
-				break
+				panic(err)
 			}
 
-			err = bwClient.Publish(&bw2.PublishParams{
+			bwClient.PublishOrExit(&bw2.PublishParams{
 				URI:            hburi,
 				Persist:        true,
 				PayloadObjects: []bw2.PayloadObject{po},
 			})
-			if err != nil {
-				fmt.Println("Failed to publish heartbeat message for service", svcname)
-				break
-			}
 
 			lastEmitted = time.Now()
 		}
 	}
 }
 
-func respawn() {
-	olog <- SLM{"meta", "doing respawn"}
-	runningSvcsLock.Lock()
-	for svcName, manifest := range runningServices {
-		cnt, err := RestartContainer(manifest, cfg.LocalRouter, true)
-		if err != nil {
-			msg := fmt.Sprintf("Container restart failed: %v", err)
-			olog <- SLM{svcName, msg}
-			fmt.Println(svcName, "::", msg)
-		} else {
-			olog <- SLM{svcName, "Container start ok"}
-			fmt.Println("Container started ok")
-			manifest.Container = cnt
-		}
-	}
-	runningSvcsLock.Unlock()
-}
-
-func restartService(serviceName string) {
-	olog <- SLM{serviceName, "attempting restart"}
-	runningSvcsLock.Lock()
-	manifest, ok := runningServices[serviceName]
-	if ok {
-		cnt, err := RestartContainer(manifest, cfg.LocalRouter, false)
-		if err != nil {
-			msg := fmt.Sprintf("Container restart failed: %v", err)
-			olog <- SLM{serviceName, msg}
-			fmt.Println(serviceName, "::", msg)
-		} else {
-			olog <- SLM{serviceName, "restart successful!"}
-			fmt.Println("Container restarted ok")
-			manifest.Container = cnt
-			go svcHeartbeat(serviceName, cnt.StatChan)
-		}
+func restartService(mfst *Manifest, initialBoot bool) {
+	if initialBoot {
+		olog <- SLM{mfst.ServiceName, "booting service"}
 	} else {
-		olog <- SLM{serviceName, "service does not exist"}
+		olog <- SLM{mfst.ServiceName, "attempting restart"}
 	}
-	runningSvcsLock.Unlock()
+
+	if mfst.logger == nil {
+		logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
+		mfst.logger = logger
+	}
+
+	cnt, err := RestartContainer(mfst, cfg.LocalRouter, initialBoot)
+	if err != nil {
+		msg := fmt.Sprintf("Container (re)start failed: %v", err)
+		olog <- SLM{mfst.ServiceName, msg}
+		fmt.Println(mfst.ServiceName, "::", msg)
+
+		availLock.Lock()
+		availableMem += int64(mfst.MemAlloc)
+		availableCPUShares += int64(mfst.CPUShares)
+		availLock.Unlock()
+
+		runningSvcsLock.Lock()
+		delete(runningServices, mfst.ServiceName)
+		runningSvcsLock.Unlock()
+	} else {
+		msg := "Container (re)start successful"
+		olog <- SLM{mfst.ServiceName, msg}
+		fmt.Println(mfst.ServiceName, "::", msg)
+		mfst.Container = cnt
+
+		if initialBoot {
+			runningSvcsLock.Lock()
+			runningServices[mfst.ServiceName] = mfst
+			runningSvcsLock.Unlock()
+		}
+		go svcHeartbeat(mfst.ServiceName, cnt.StatChan)
+	}
 }
 
 func stopService(serviceName string) {
@@ -417,10 +353,11 @@ func stopService(serviceName string) {
 			manifest.AutoRestart = false
 
 			// Updating available mem and cpu shares done by event monitor
-			err := StopContainer(manifest.ServiceName)
+			err := StopContainer(manifest.ServiceName, true)
 			if err != nil {
-				olog <- SLM{serviceName, "failed to stop container"}
-				fmt.Println("ERROR IN CONTAINER: ", err)
+				msg := "Failed to stop container: " + err.Error()
+				olog <- SLM{serviceName, msg}
+				fmt.Println(msg)
 			} else {
 				// Log message will be output by docker event monitor
 				fmt.Println("Container stopped successfully")
@@ -450,13 +387,11 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if !ok {
 		return
 	}
-
 	config = &objects.SvcConfig{}
-	err := cfgPo.ValueInto(config)
+	err := cfgPo.ValueInto(&config)
 	if err != nil {
 		panic(err)
 	}
-
 	rawMem := config.MemAlloc
 	memAlloc, err := parseMemAlloc(rawMem)
 	if err != nil {
@@ -467,7 +402,6 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
-
 	fileIncludePo := m.GetOnePODF(bw2.PODFString)
 	var fileIncludeEnc string
 	if fileIncludePo != nil {
@@ -477,7 +411,6 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
-
 	var restartWaitDur time.Duration
 	if config.RestartInt != "" {
 		restartWaitDur, err = time.ParseDuration(config.RestartInt)
@@ -520,7 +453,6 @@ func handleConfig(m *bw2.SimpleMessage) {
 		stopService(config.ServiceName)
 	}
 
-	logger := NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName)
 	mf := Manifest{
 		ServiceName:   config.ServiceName,
 		Entity:        econtents,
@@ -532,10 +464,11 @@ func handleConfig(m *bw2.SimpleMessage) {
 		AutoRestart:   config.AutoRestart,
 		RestartInt:    restartWaitDur,
 		Volumes:       config.Volumes,
-		logger:        logger,
+		logger:        NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName),
 	}
 
-	svcSpawnCh <- &mf
+	go restartService(&mf, true)
+
 }
 
 func parseMemAlloc(alloc string) (uint64, error) {
@@ -605,81 +538,36 @@ func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]
 func monitorDockerEvents(ec *chan *docker.APIEvents) {
 	for event := range *ec {
 		if event.Action == "die" {
+			var relevantManifest *Manifest
 			runningSvcsLock.Lock()
-			for name, manifest := range runningServices {
+			for _, manifest := range runningServices {
 				// Need to shadow to avoid loop reference variable bug
-				manifest := manifest
 				if manifest.Container.Raw.ID == event.Actor.ID {
-					olog <- SLM{name, "Container stopped"}
-
-					if manifest.AutoRestart {
-						go func() {
-							if manifest.RestartInt > 0 {
-								time.Sleep(manifest.RestartInt)
-							}
-							cnt, err := RestartContainer(manifest, cfg.LocalRouter, false)
-							if err != nil {
-								msg := fmt.Sprintf("Service auto restart failed: %+v", err)
-								olog <- SLM{name, msg}
-								fmt.Println(msg)
-
-								runningSvcsLock.Lock()
-								delete(runningServices, name)
-								runningSvcsLock.Unlock()
-
-								availLock.Lock()
-								availableCPUShares += int64(manifest.CPUShares)
-								availableMem += int64(manifest.MemAlloc)
-								availLock.Unlock()
-
-							} else {
-								olog <- SLM{name, "Auto restart successful!"}
-								fmt.Println("Container restart ok")
-								// Pointer directly to manifest, don't need to worry about locks
-								manifest.Container = cnt
-								go svcHeartbeat(manifest.ServiceName, cnt.StatChan)
-							}
-						}()
-					} else {
-						delete(runningServices, name)
-						// Still need to update memory and cpu availability
-						availLock.Lock()
-						availableCPUShares += int64(manifest.CPUShares)
-						availableMem += int64(manifest.MemAlloc)
-						availLock.Unlock()
-					}
+					relevantManifest = manifest
 				}
 			}
 			runningSvcsLock.Unlock()
-		}
-	}
-}
 
-func doSvcSpawn() {
-	for manifest := range svcSpawnCh {
-		olog <- SLM{manifest.ServiceName, "starting new service"}
-		cnt, err := RestartContainer(manifest, cfg.LocalRouter, true)
-		if err != nil {
-			msg := fmt.Sprintf("Failed to start new container: %v", err)
-			olog <- SLM{manifest.ServiceName, msg}
-			fmt.Println(manifest.ServiceName, "::", msg)
-
-			// We have to update resource pool manually
-			// Event monitor doesn't know about pending container yet
-			availLock.Lock()
-			availableMem += int64(manifest.MemAlloc)
-			availableCPUShares += int64(manifest.CPUShares)
-			availLock.Unlock()
-		} else {
-			olog <- SLM{manifest.ServiceName, "start successful!"}
-			fmt.Println("Container started ok")
-			manifest.Container = cnt
-
-			runningSvcsLock.Lock()
-			runningServices[manifest.ServiceName] = manifest
-			runningSvcsLock.Unlock()
-
-			go svcHeartbeat(manifest.ServiceName, manifest.Container.StatChan)
+			if relevantManifest != nil {
+				olog <- SLM{relevantManifest.ServiceName, "Container stopped"}
+				if relevantManifest.AutoRestart {
+					go func() {
+						if relevantManifest.RestartInt > 0 {
+							time.Sleep(relevantManifest.RestartInt)
+						}
+						restartService(relevantManifest, false)
+					}()
+				} else {
+					runningSvcsLock.Lock()
+					delete(runningServices, relevantManifest.ServiceName)
+					runningSvcsLock.Unlock()
+					// Still need to update memory and cpu availability
+					availLock.Lock()
+					availableCPUShares += int64(relevantManifest.CPUShares)
+					availableMem += int64(relevantManifest.MemAlloc)
+					availLock.Unlock()
+				}
+			}
 		}
 	}
 }
@@ -736,6 +624,7 @@ func recoverPreviousState() {
 	knownContainers, err := GetSpawnedContainers()
 	if err != nil {
 		fmt.Printf("Failed to retrieve container info: %v\n", err)
+		return
 	}
 
 	// Note that we do not have to worry about memory or CPU consumption
@@ -744,36 +633,23 @@ func recoverPreviousState() {
 	for _, mfst := range priorManifests {
 		containerInfo, ok := knownContainers[mfst.ServiceName]
 		if ok {
-			logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
-			mfst.logger = logger
-			if containerInfo.Raw.State.Running {
-				// Container continued running after spawnd terminated, reclaim ownership
-				AttachLogger(containerInfo.Raw, logger)
-				statChan := CollectStats(containerInfo.Raw)
-				mfst.Container = &SpawnPointContainer{containerInfo.Raw, mfst.ServiceName, statChan}
-				newManifests[mfst.ServiceName] = &mfst
-				go svcHeartbeat(mfst.ServiceName, statChan)
+			if containerInfo.Raw.State.Running || mfst.AutoRestart {
+				if containerInfo.Raw.State.Running {
+					// Container continued running after spawnd terminated, reclaim ownership
+					logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
+					mfst.logger = logger
+					mfst.Container = ReclaimContainer(&mfst, containerInfo.Raw)
+				} else {
+					// Container has stopped, so try to restart it
+					restartService(&mfst, false)
+				}
 
+				newManifests[mfst.ServiceName] = &mfst
+				go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 				availLock.Lock()
 				availableMem -= int64(mfst.MemAlloc)
 				availableCPUShares -= int64(mfst.CPUShares)
 				availLock.Unlock()
-
-			} else if mfst.AutoRestart {
-				// Container has stopped, so try to restart it
-				spCnt, err := RestartContainer(&mfst, cfg.LocalRouter, false)
-				if err != nil {
-					fmt.Printf("Failed to restart previously running contianer: %v\n", err)
-				} else {
-					mfst.Container = spCnt
-					newManifests[mfst.ServiceName] = &mfst
-					go svcHeartbeat(mfst.ServiceName, spCnt.StatChan)
-
-					availLock.Lock()
-					availableMem -= int64(mfst.MemAlloc)
-					availableCPUShares -= int64(mfst.CPUShares)
-					availLock.Unlock()
-				}
 			}
 		}
 	}

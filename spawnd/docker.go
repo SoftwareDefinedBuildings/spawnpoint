@@ -61,7 +61,7 @@ func GetSpawnedContainers() (map[string]*SpawnPointContainer, error) {
 	return rv, nil
 }
 
-func StopContainer(serviceName string) error {
+func StopContainer(serviceName string, removeContainer bool) error {
 	curContainers, err := GetSpawnedContainers()
 	if err != nil {
 		return err
@@ -77,13 +77,15 @@ func StopContainer(serviceName string) error {
 				}
 			}
 
-			fmt.Println("Removing existing container for svc", serviceName)
-			err := dkr.RemoveContainer(docker.RemoveContainerOptions{
-				ID:    containerInfo.Raw.ID,
-				Force: false,
-			})
-			if err != nil {
-				return err
+			if removeContainer {
+				fmt.Println("Removing existing container for svc", serviceName)
+				err := dkr.RemoveContainer(docker.RemoveContainerOptions{
+					ID:    containerInfo.Raw.ID,
+					Force: false,
+				})
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -94,9 +96,9 @@ func StopContainer(serviceName string) error {
 func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPointContainer, error) {
 	// First remove previous container
 	fmt.Println("Restarting container for svc", cfg.ServiceName)
-	err := StopContainer(cfg.ServiceName)
+	err := StopContainer(cfg.ServiceName, true)
 	if err != nil {
-		fmt.Println("Failed to remove container for svc", cfg.ServiceName)
+		fmt.Println("Failed to stop container for svc", cfg.ServiceName)
 		return nil, err
 	}
 
@@ -154,10 +156,16 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 		return nil, err
 	}
 
-	AttachLogger(cnt, cfg.logger)
-	statChan := CollectStats(cnt)
+	attachLogger(cnt, cfg.logger)
+	statChan := collectStats(cnt)
 
 	return &SpawnPointContainer{cnt, cfg.ServiceName, statChan}, nil
+}
+
+func ReclaimContainer(mfst *Manifest, container *docker.Container) *SpawnPointContainer {
+	attachLogger(container, mfst.logger)
+	statChan := collectStats(container)
+	return &SpawnPointContainer{container, mfst.ServiceName, statChan}
 }
 
 func rebuildImage(cfg *Manifest, imgname string) error {
@@ -224,7 +232,7 @@ func createMounts(svcName string, volumeNames []string) ([]docker.Mount, error) 
 	return mounts, nil
 }
 
-func AttachLogger(container *docker.Container, logger *BWLogger) {
+func attachLogger(container *docker.Container, logger *BWLogger) {
 	go dkr.AttachToContainer(docker.AttachToContainerOptions{
 		Container:    container.ID,
 		OutputStream: logger,
@@ -236,7 +244,7 @@ func AttachLogger(container *docker.Container, logger *BWLogger) {
 	})
 }
 
-func CollectStats(container *docker.Container) *chan (*docker.Stats) {
+func collectStats(container *docker.Container) *chan (*docker.Stats) {
 	statChan := make(chan *docker.Stats)
 	go dkr.Stats(docker.StatsOptions{
 		ID:     container.ID,

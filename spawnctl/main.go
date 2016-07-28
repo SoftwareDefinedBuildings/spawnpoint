@@ -44,7 +44,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "spawnctl"
 	app.Usage = "Control and Monitor Spawnpoints"
-	app.Version = "0.0.2"
+	app.Version = "0.1"
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
