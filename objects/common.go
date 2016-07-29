@@ -4,6 +4,8 @@ import (
 	"time"
 )
 
+const SpawnpointVersion = "0.1.1"
+
 type SpawnPointHb struct {
 	Alias              string
 	Time               int64

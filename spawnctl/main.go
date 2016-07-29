@@ -353,7 +353,7 @@ func encodeEntityFile(fileName string) (string, error) {
 }
 
 func createArchiveEncoding(includedDirs []string, includedFiles []string) (string, error) {
-	includedEntities := 0
+	includedItems := 0
 	tarFileName := os.TempDir() + "/sp_include.tar"
 	tar := new(archivex.TarFile)
 	tar.Create(tarFileName)
@@ -365,7 +365,7 @@ func createArchiveEncoding(includedDirs []string, includedFiles []string) (strin
 				ansi.ColorCode("yellow+b"), absPath, ansi.ColorCode("reset"))
 		} else {
 			tar.AddAll(absPath, false)
-			includedEntities++
+			includedItems++
 		}
 	}
 
@@ -378,7 +378,7 @@ func createArchiveEncoding(includedDirs []string, includedFiles []string) (strin
 			if err = tar.AddFile(absPath); err != nil {
 				return "", err
 			}
-			includedEntities++
+			includedItems++
 		}
 	}
 
@@ -387,7 +387,7 @@ func createArchiveEncoding(includedDirs []string, includedFiles []string) (strin
 	}
 	defer os.Remove(tarFileName)
 
-	if includedEntities == 0 {
+	if includedItems == 0 {
 		return "", nil
 	}
 
@@ -446,7 +446,7 @@ func actionDeploy(c *cli.Context) error {
 	deployment.ServiceName = svcName
 	deployment.Entity, err = encodeEntityFile(deployment.Entity)
 	if err != nil {
-		msg := "Invalid entity file"
+		msg := "Config contains invalid entity file: " + err.Error()
 		fmt.Println(msg)
 		return errors.New(msg)
 	}

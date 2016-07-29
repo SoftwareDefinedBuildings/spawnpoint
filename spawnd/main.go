@@ -14,14 +14,12 @@ import (
 	"github.com/codegangsta/cli"
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/uris"
-	"gopkg.in/vmihailenco/msgpack.v2"
+	"github.com/mgutz/ansi"
 
 	docker "github.com/fsouza/go-dockerclient"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
 	yaml "gopkg.in/yaml.v2"
 )
-
-const SpawnDVersion = "0.1.1"
 
 var bwClient *bw2.BW2Client
 var cfg *DaemonConfig
@@ -42,11 +40,8 @@ var (
 
 var eventCh chan *docker.APIEvents
 
-const HeartbeatPeriod = 5
-const (
-	persistFileName = ".spawnd_svcs"
-	writeFilePeriod = 10
-)
+const heartbeatPeriod = 5
+const persistManifestPeriod = 10
 
 type SLM struct {
 	Service string
@@ -57,7 +52,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "spawnd"
 	app.Usage = "Run a Spawnpoint Daemon"
-	app.Version = SpawnDVersion
+	app.Version = objects.SpawnpointVersion
 
 	app.Commands = []cli.Command{
 		{
@@ -154,8 +149,9 @@ func actionRun(c *cli.Context) error {
 
 	go doOlog()
 	go heartbeat()
-	go writePersistenceFile()
-	fmt.Println("Spawnpoint Daemon - Version", SpawnDVersion)
+	go persistManifests()
+	fmt.Printf("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
+		objects.SpawnpointVersion, ansi.ColorCode("reset"))
 
 	for {
 		select {
@@ -236,7 +232,7 @@ func heartbeat() {
 			})
 		}
 
-		time.Sleep(HeartbeatPeriod * time.Second)
+		time.Sleep(heartbeatPeriod * time.Second)
 	}
 }
 
@@ -244,7 +240,7 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 	lastEmitted := time.Now()
 	lastCPUPercentage := 0.0
 	for stats := range *statCh {
-		if stats.Read.Sub(lastEmitted).Seconds() > HeartbeatPeriod {
+		if stats.Read.Sub(lastEmitted).Seconds() > heartbeatPeriod {
 			runningSvcsLock.Lock()
 			manifest, ok := runningServices[svcname]
 			runningSvcsLock.Unlock()
@@ -574,7 +570,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 	}
 }
 
-func writePersistenceFile() {
+func persistManifests() {
 	for {
 		manifests := make([]Manifest, len(runningServices))
 		i := 0
@@ -597,29 +593,38 @@ func writePersistenceFile() {
 		}
 		runningSvcsLock.Unlock()
 
-		rawBytes, err := msgpack.Marshal(manifests)
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, manifests)
 		if err != nil {
-			fmt.Printf("Failed to serialize for persistence file: %v\n", err)
-		} else if err = ioutil.WriteFile(persistFileName, rawBytes, 0600); err != nil {
-			fmt.Printf("Failed to write to persistence file: %v\n", err)
+			fmt.Println("Failed to marshal manifests for persistence")
+		} else {
+			bwClient.Publish(&bw2.PublishParams{
+				URI:            uris.SignalPath(cfg.Path, "manifests"),
+				Persist:        true,
+				PayloadObjects: []bw2.PayloadObject{po},
+			})
 		}
 
-		time.Sleep(writeFilePeriod * time.Second)
+		time.Sleep(persistManifestPeriod * time.Second)
 	}
 }
 
 func recoverPreviousState() {
-	rawBytes, err := ioutil.ReadFile(persistFileName)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			fmt.Printf("Failed to read from persistence file: %v\n", err)
-		}
+	mfstMsg := bwClient.QueryOneOrExit(&bw2.QueryParams{
+		URI: uris.SignalPath(cfg.Path, "manifests"),
+	})
+	if mfstMsg == nil {
+		return
+	}
+
+	msgPackPo := mfstMsg.GetOnePODF(bw2.PODFMsgPack)
+	if msgPackPo == nil {
+		fmt.Println("Error: Persisted manifests did not contain msgpack PO")
 		return
 	}
 
 	var priorManifests []Manifest
-	if err = msgpack.Unmarshal(rawBytes, &priorManifests); err != nil {
-		fmt.Printf("Failed to deserialize persistence data: %v\n", err)
+	if err := msgPackPo.(bw2.MsgPackPayloadObject).ValueInto(&priorManifests); err != nil {
+		fmt.Printf("Failed to unmarshal persistence data: %v\n", err)
 		return
 	}
 
