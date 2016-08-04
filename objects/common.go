@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-const SpawnpointVersion = "0.1.1"
+const SpawnpointVersion = "0.1.2"
 
 type SpawnPointHb struct {
 	Alias              string
@@ -40,6 +40,14 @@ type SpawnPoint struct {
 	AvailableMem       int64
 }
 
+type Service struct {
+	Name      string
+	HostURI   string
+	LastSeen  time.Time
+	MemAlloc  uint64
+	CPUShares uint64
+}
+
 func (sp *SpawnPoint) Good() bool {
 	return time.Now().Sub(sp.LastSeen) < 10*time.Second
 }
@@ -48,7 +56,7 @@ func IsSpawnPointGood(lastSeen time.Time) bool {
 	return time.Now().Sub(lastSeen) < 10*time.Second
 }
 
-type SPLog struct {
+type SPLogMsg struct {
 	Time     int64
 	SPAlias  string
 	Service  string

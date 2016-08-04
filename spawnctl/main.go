@@ -2,49 +2,26 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"text/template"
 	"time"
 
 	"github.com/immesys/spawnpoint/objects"
-	"github.com/immesys/spawnpoint/uris"
-	"github.com/jhoonb/archivex"
+	"github.com/immesys/spawnpoint/spawnclient"
 	"gopkg.in/yaml.v2"
 
 	"github.com/codegangsta/cli"
 	"github.com/mgutz/ansi"
-	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
-
-func initCon(c *cli.Context) *bw2.BW2Client {
-	BWC, err := bw2.Connect(c.GlobalString("router"))
-	if err != nil {
-		fmt.Println("Could not connect to router: ", err)
-		os.Exit(1)
-	}
-
-	_, err = BWC.SetEntityFile(c.GlobalString("entity"))
-	if err != nil {
-		fmt.Println("Could not set entity: ", err)
-		os.Exit(1)
-	}
-
-	BWC.OverrideAutoChainTo(true)
-	return BWC
-}
 
 func main() {
 	app := cli.NewApp()
 	app.Name = "spawnctl"
 	app.Usage = "Control and Monitor Spawnpoints"
-	app.Version = "0.1"
+	app.Version = objects.SpawnpointVersion
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -96,13 +73,18 @@ func main() {
 			},
 		},
 		{
-			Name:   "monitor",
-			Usage:  "Monitor a running spawnpoint",
-			Action: actionMonitor,
+			Name:   "tail",
+			Usage:  "Tail logs of a running spawnpoint service",
+			Action: actionTail,
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "uri, u",
-					Usage: "a base URI to monitor",
+					Usage: "a base URI of spawnpoint running the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "name of the service to tail",
 					Value: "",
 				},
 			},
@@ -145,68 +127,11 @@ func main() {
 	app.Run(os.Args)
 }
 
-func scan(baseuri string, BWC *bw2.BW2Client) (map[string]objects.SpawnPoint, error) {
-	scanuri := uris.SignalPath(baseuri, "heartbeat")
-	res, err := BWC.Query(&bw2.QueryParams{URI: scanuri})
-	if err != nil {
-		fmt.Println("Unable to do scan query:", err)
-		return nil, err
+func fixuri(u string) string {
+	if len(u) > 0 && u[len(u)-1] == '/' {
+		return u[:len(u)-1]
 	}
-
-	rv := make(map[string]objects.SpawnPoint)
-	for r := range res {
-		for _, po := range r.POs {
-			if po.IsTypeDF(bw2.PODFSpawnpointHeartbeat) {
-				hb := objects.SpawnPointHb{}
-				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
-				if err != nil {
-					fmt.Println("Received malformed heartbeat:", err)
-					continue
-				}
-
-				uri := r.URI[:len(r.URI)-len("/s.spawnpoint/server/i.spawnpoint/signal/heartbeat")]
-				ls := time.Unix(0, hb.Time)
-				v := objects.SpawnPoint{
-					URI:                uri,
-					LastSeen:           ls,
-					Alias:              hb.Alias,
-					AvailableMem:       hb.AvailableMem,
-					AvailableCPUShares: hb.AvailableCPUShares,
-				}
-
-				rv[hb.Alias] = v
-			}
-		}
-	}
-
-	return rv, nil
-}
-
-func inspect(spawnpointURI string, BWC *bw2.BW2Client) (map[string]objects.SpawnpointSvcHb, error) {
-	inspectURI := uris.ServiceSignalPath(spawnpointURI, "*", "heartbeat")
-	res, err := BWC.Query(&bw2.QueryParams{URI: inspectURI})
-	if err != nil {
-		fmt.Println("Unable to do inspect query:", err)
-		return nil, err
-	}
-
-	rv := make(map[string]objects.SpawnpointSvcHb)
-	for r := range res {
-		for _, po := range r.POs {
-			if po.IsTypeDF(bw2.PODFSpawnpointSvcHb) {
-				hb := objects.SpawnpointSvcHb{}
-				err = po.(bw2.MsgPackPayloadObject).ValueInto(&hb)
-				if err != nil {
-					fmt.Println("Received malformed service heartbeat:", err)
-					continue
-				}
-
-				rv[r.URI] = hb
-			}
-		}
-	}
-
-	return rv, nil
+	return u
 }
 
 func printLastSeen(lastSeen time.Time, name string, uri string) {
@@ -228,26 +153,36 @@ func printLastSeen(lastSeen time.Time, name string, uri string) {
 }
 
 func actionScan(c *cli.Context) error {
-	BWClient := initCon(c)
-
-	baseuri := fixuri(c.String("uri"))
-	if len(baseuri) == 0 {
-		msg := "Missing URI parameter"
+	entityFile := c.GlobalString("entity")
+	if entityFile == "" {
+		msg := "No Bosswave entity specified"
 		fmt.Println(msg)
 		return errors.New(msg)
 	}
 
+	baseuri := fixuri(c.String("uri"))
+	if len(baseuri) == 0 {
+		msg := "Missing 'uri' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
 	if strings.HasSuffix(baseuri, "/") {
-		baseuri += "+"
+		baseuri += "*"
 	} else if !strings.HasSuffix(baseuri, "/*") {
 		baseuri += "/*"
 	}
 
-	spawnPoints, err := scan(baseuri, BWClient)
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entityFile)
 	if err != nil {
-		fmt.Println("Scan failed:", err)
+		fmt.Println("Failed to initialize spawn client:", err)
 		return err
 	}
+	spawnPoints, err := spawnClient.Scan(baseuri)
+	if err != nil {
+		fmt.Println("Spawnpoint scan failed:", err)
+		return err
+	}
+
 	fmt.Printf("Discovered %v SpawnPoints:\n", len(spawnPoints))
 	// Print out status information on all discovered spawnpoints
 	for _, sp := range spawnPoints {
@@ -259,18 +194,17 @@ func actionScan(c *cli.Context) error {
 	if len(spawnPoints) == 1 {
 		// Print detailed information about single spawnpoint
 		for _, sp := range spawnPoints {
-			serviceHbs, err := inspect(sp.URI, BWClient)
+			svcs, err := spawnClient.Inspect(sp.URI)
 			if err != nil {
 				fmt.Println("Inspect failed:", err)
 				return err
 			}
 
-			for _, svcHb := range serviceHbs {
-				lastSeen := time.Unix(0, svcHb.Time)
+			for _, svc := range svcs {
 				fmt.Print("    ")
-				printLastSeen(lastSeen, svcHb.Name, "")
+				printLastSeen(svc.LastSeen, svc.Name, "")
 				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n",
-					svcHb.MemAlloc, svcHb.CPUShares)
+					svc.MemAlloc, svc.CPUShares)
 			}
 		}
 	}
@@ -278,262 +212,114 @@ func actionScan(c *cli.Context) error {
 	return nil
 }
 
-func recParse(t *template.Template, filename string) (*template.Template, error) {
-	return t.ParseFiles(filename)
+func tailLog(log chan *objects.SPLogMsg) {
+	for logMsg := range log {
+		tstring := time.Unix(0, logMsg.Time).Format("01/02 15:04:05")
+		fmt.Printf("[%s] %s%s::%s > %s%s\n", tstring, ansi.ColorCode("blue+b"), logMsg.SPAlias,
+			logMsg.Service, ansi.ColorCode("reset"), strings.Trim(logMsg.Contents, "\n"))
+	}
+}
+
+func actionRestart(c *cli.Context) error {
+	return issueServiceCommand(c, "restart")
+}
+
+func actionStop(c *cli.Context) error {
+	return issueServiceCommand(c, "stop")
+}
+
+func actionTail(c *cli.Context) error {
+	return issueServiceCommand(c, "tail")
+}
+
+func issueServiceCommand(c *cli.Context, command string) error {
+	entity := c.GlobalString("entity")
+	if entity == "" {
+		msg := "Failed to specify entity file"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+	uri := c.String("uri")
+	if uri == "" {
+		msg := "Failed to specify 'uri' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+	name := c.String("name")
+	if name == "" {
+		msg := "Failed to specify 'name' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
+	if err != nil {
+		msg := "Failed to initialize spawn client: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+
+	var log chan *objects.SPLogMsg
+	switch command {
+	case "restart":
+		log, err = spawnClient.RestartService(uri, name)
+	case "stop":
+		log, err = spawnClient.StopService(uri, name)
+	case "tail":
+		log, err = spawnClient.TailService(uri, name)
+	}
+	if err != nil {
+		msg := "Failed to restart service: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+
+	fmt.Printf("%sMonitoring service log. Press Ctrl-C to quit.%s\n",
+		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
+	tailLog(log)
+	return nil
 }
 
 func parseConfig(filename string) (*objects.SvcConfig, error) {
 	tmp := template.New("root")
-	tmp, err := recParse(tmp, filename)
+	tmp, err := tmp.ParseFiles(filename)
 	if err != nil {
 		return nil, err
 	}
 
 	buf := bytes.Buffer{}
 	leafName := filename[strings.LastIndex(filename, "/")+1:]
-	err = tmp.ExecuteTemplate(&buf, leafName, struct{}{})
-	if err != nil {
+	if err = tmp.ExecuteTemplate(&buf, leafName, struct{}{}); err != nil {
 		return nil, err
 	}
 
 	var rv objects.SvcConfig
-	err = yaml.Unmarshal(buf.Bytes(), &rv)
-	if err != nil {
+	if err = yaml.Unmarshal(buf.Bytes(), &rv); err != nil {
 		return nil, err
 	}
 
 	return &rv, nil
 }
 
-func fixuri(u string) string {
-	if len(u) > 0 && u[len(u)-1] == '/' {
-		return u[:len(u)-1]
-	}
-	return u
-}
-
-func taillogs(logs []chan *bw2.SimpleMessage) {
-	cases := make([]reflect.SelectCase, len(logs))
-	for i, log := range logs {
-		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(log)}
-	}
-
-	for {
-		_, msgVal, _ := reflect.Select(cases)
-		// I may have no idea what I'm doing
-		msg := msgVal.Interface().(*bw2.SimpleMessage)
-
-		for _, po := range msg.POs {
-			if po.IsTypeDF(bw2.PODFSpawnpointLog) {
-				entry := objects.SPLog{}
-				err := po.(bw2.MsgPackPayloadObject).ValueInto(&entry)
-				if err != nil {
-					fmt.Printf("%s[WARN] malformed log entry%s\n", ansi.ColorCode("red+b"),
-						ansi.ColorCode("reset"))
-					continue
-				}
-
-				tstring := time.Unix(0, entry.Time).Format("01/02 15:04:05")
-				fmt.Printf("[%s] %s%s::%s > %s%s\n",
-					tstring, ansi.ColorCode("blue+b"),
-					entry.SPAlias, entry.Service,
-					ansi.ColorCode("reset"), strings.Trim(entry.Contents, "\n"))
-			}
-		}
-	}
-}
-
-func encodeEntityFile(fileName string) (string, error) {
-	absPath, _ := filepath.Abs(fileName)
-	contents, err := ioutil.ReadFile(absPath)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(contents), nil
-}
-
-func createArchiveEncoding(includedDirs []string, includedFiles []string) (string, error) {
-	includedItems := 0
-	tarFileName := os.TempDir() + "/sp_include.tar"
-	tar := new(archivex.TarFile)
-	tar.Create(tarFileName)
-
-	for _, dirName := range includedDirs {
-		absPath, _ := filepath.Abs(dirName)
-		if _, err := os.Stat(absPath); os.IsNotExist(err) {
-			fmt.Printf("%s[WARN] Directory %s does not exist. Omitting.%s\n",
-				ansi.ColorCode("yellow+b"), absPath, ansi.ColorCode("reset"))
-		} else {
-			tar.AddAll(absPath, false)
-			includedItems++
-		}
-	}
-
-	for _, fileName := range includedFiles {
-		absPath, _ := filepath.Abs(fileName)
-		if _, err := os.Stat(absPath); os.IsNotExist(err) {
-			fmt.Printf("%s[WARN] File %s does not exist. Omitting.%s\n",
-				ansi.ColorCode("yellow+b"), absPath, ansi.ColorCode("reset"))
-		} else {
-			if err = tar.AddFile(absPath); err != nil {
-				return "", err
-			}
-			includedItems++
-		}
-	}
-
-	if err := tar.Close(); err != nil {
-		return "", err
-	}
-	defer os.Remove(tarFileName)
-
-	if includedItems == 0 {
-		return "", nil
-	}
-
-	rawBytes, err := ioutil.ReadFile(tarFileName)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(rawBytes), nil
-}
-
 func actionDeploy(c *cli.Context) error {
-	BWClient := initCon(c)
-
+	entity := c.GlobalString("entity")
+	if entity == "" {
+		msg := "Missing 'entity' parameter"
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
 	spURI := fixuri(c.String("uri"))
-	if len(spURI) == 0 {
+	if spURI == "" {
 		msg := "Missing 'uri' parameter"
 		fmt.Println(msg)
 		return errors.New(msg)
 	}
-	spAlias := spURI[strings.LastIndex(spURI, "/")+1:]
 	cfgFile := c.String("config")
-	if len(cfgFile) == 0 {
+	if cfgFile == "" {
 		msg := "Missing 'config' parameter"
 		fmt.Println(msg)
 		return errors.New(msg)
 	}
-	svcName := c.String("name")
-	if len(svcName) == 0 {
-		msg := "Missing 'name' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
-	spawnpoints, err := scan(spURI, BWClient)
-	if err != nil {
-		fmt.Println("Initial spawnpoint scan failed:", err)
-		return err
-	}
-	sp, ok := spawnpoints[spAlias]
-	if !ok {
-		msg := "Spawnpoint " + spURI + " not found"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-	if !sp.Good() {
-		fmt.Printf("%s[WARN] spawnpoint '%s' appears down. Writing config anyway.%s\n",
-			ansi.ColorCode("yellow+b"), sp.Alias, ansi.ColorCode("reset"))
-	}
-
-	deployment, err := parseConfig(cfgFile)
-	if err != nil {
-		fmt.Println("Invalid config file:", err)
-		return err
-	}
-
-	deployment.ServiceName = svcName
-	deployment.Entity, err = encodeEntityFile(deployment.Entity)
-	if err != nil {
-		msg := "Config contains invalid entity file: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
-	pos := make([]bw2.PayloadObject, 1)
-	configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, deployment)
-	if err != nil {
-		msg := "Failed to serialize config file"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-	pos[0] = configPo
-
-	includedArchiveEnc, err := createArchiveEncoding(deployment.IncludedDirs, deployment.IncludedFiles)
-	if err != nil {
-		msg := "Failed to serialize included files"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-	if includedArchiveEnc != "" {
-		pos = append(pos, bw2.CreateStringPayloadObject(includedArchiveEnc))
-	}
-
-	logURI := uris.ServiceSignalPath(spURI, svcName, "log")
-	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: logURI})
-	if err != nil {
-		fmt.Println("ERROR subscribing to log:", err)
-	}
-
-	configURI := uris.SlotPath(spURI, "config")
-	fmt.Println("Publishing cfg to: ", configURI)
-	err = BWClient.Publish(&bw2.PublishParams{URI: configURI, PayloadObjects: pos})
-	if err != nil {
-		msg := fmt.Sprintf("Failed to publish config: %v", err)
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
-	fmt.Printf("%s !! FINISHED DEPLOYMENT, TAILING LOGS. CTRL-C TO QUIT !! %s\n",
-		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
-	taillogs([]chan *bw2.SimpleMessage{log})
-
-	return nil
-}
-
-func actionMonitor(c *cli.Context) error {
-	baseuri := fixuri(c.String("uri"))
-	if baseuri == "" {
-		msg := "Missing 'uri' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
-	uri := uris.ServiceSignalPath(baseuri, "+", "log")
-
-	BWClient := initCon(c)
-
-	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: uri})
-	if err != nil {
-		msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
-	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
-		uri, ansi.ColorCode("reset"))
-	taillogs([]chan *bw2.SimpleMessage{log})
-
-	return nil
-}
-
-func actionRestart(c *cli.Context) error {
-	return manipulateService(c, "restart")
-}
-
-func actionStop(c *cli.Context) error {
-	return manipulateService(c, "stop")
-}
-
-func manipulateService(c *cli.Context, command string) error {
-	baseuri := fixuri(c.String("uri"))
-	if baseuri == "" {
-		msg := "Missing 'uri' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
-	}
-
 	svcName := c.String("name")
 	if svcName == "" {
 		msg := "Missing 'name' parameter"
@@ -541,29 +327,29 @@ func manipulateService(c *cli.Context, command string) error {
 		return errors.New(msg)
 	}
 
-	BWClient := initCon(c)
-
-	subURI := uris.ServiceSignalPath(baseuri, svcName, "log")
-	log, err := BWClient.Subscribe(&bw2.SubscribeParams{URI: subURI})
+	svcConfig, err := parseConfig(cfgFile)
 	if err != nil {
-		msg := fmt.Sprintf("Could not subscribe to log URI: %v", err)
+		msg := "Invalid service configuration file: " + err.Error()
 		fmt.Println(msg)
 		return errors.New(msg)
 	}
+	svcConfig.ServiceName = svcName
 
-	po := bw2.CreateStringPayloadObject(svcName)
-	err = BWClient.Publish(&bw2.PublishParams{
-		URI:            uris.SlotPath(baseuri, command),
-		PayloadObjects: []bw2.PayloadObject{po},
-	})
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
-		fmt.Printf("Failed to publish %s request: %v\n", command, err)
+		msg := "Failed to initialize spawn client: " + err.Error()
+		fmt.Println(msg)
+		return errors.New(msg)
+	}
+	log, err := spawnClient.DeployService(svcConfig, spURI, svcName)
+	if err != nil {
+		fmt.Printf("%s[ERROR]%s Service deployment failed, %v", ansi.ColorCode("red+b"),
+			ansi.ColorCode("reset"), err)
 		return err
 	}
 
-	fmt.Printf("%sMonitoring log URI %s. Ctrl-C to quit%s\n", ansi.ColorCode("green+b"),
-		subURI, ansi.ColorCode("reset"))
-	taillogs([]chan *bw2.SimpleMessage{log})
-
+	fmt.Printf("%s Deployment complete, tailing log. Ctrl-C to quit.%s\n",
+		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
+	tailLog(log)
 	return nil
 }

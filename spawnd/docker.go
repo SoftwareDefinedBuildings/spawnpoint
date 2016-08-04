@@ -116,6 +116,13 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	if err != nil {
 		fmt.Printf("Failed to set up container volumes: %v\n", err)
 	}
+	portBindings := make(map[docker.Port][]docker.PortBinding)
+	if strings.HasPrefix(bwRouter, "localhost:") || strings.HasPrefix(bwRouter, "127.0.0.1:") {
+		bwPortNum := bwRouter[strings.Index(bwRouter, ":")+1:]
+		containerPort := docker.Port(bwPortNum + "/tcp")
+		hostPort := docker.PortBinding{HostPort: bwPortNum}
+		portBindings[containerPort] = []docker.PortBinding{hostPort}
+	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
 		Name: "spawnpoint_" + cfg.ServiceName,
@@ -130,6 +137,12 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 			AttachStderr: true,
 			AttachStdin:  true,
 		},
+		HostConfig: &docker.HostConfig{
+			NetworkMode:  "host",
+			Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
+			CPUShares:    int64(cfg.CPUShares),
+			PortBindings: portBindings,
+		},
 	})
 	if err != nil {
 		fmt.Println("Error building new container for svc", cfg.ServiceName)
@@ -137,20 +150,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 		return nil, err
 	}
 
-	portBindings := make(map[docker.Port][]docker.PortBinding)
-	if strings.HasPrefix(bwRouter, "localhost:") || strings.HasPrefix(bwRouter, "127.0.0.1:") {
-		bwPortNum := bwRouter[strings.Index(bwRouter, ":")+1:]
-		containerPort := docker.Port(bwPortNum + "/tcp")
-		hostPort := docker.PortBinding{HostPort: bwPortNum}
-		portBindings[containerPort] = []docker.PortBinding{hostPort}
-	}
-
-	err = dkr.StartContainer(cnt.ID, &docker.HostConfig{
-		NetworkMode:  "host",
-		Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
-		CPUShares:    int64(cfg.CPUShares),
-		PortBindings: portBindings,
-	})
+	err = dkr.StartContainer(cnt.ID, nil)
 	if err != nil {
 		fmt.Println("Failed to start container for svc", cfg.ServiceName)
 		return nil, err

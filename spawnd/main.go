@@ -111,6 +111,9 @@ func actionRun(c *cli.Context) error {
 		fmt.Println(msg)
 		return errors.New(msg)
 	}
+	if cfg.LocalRouter == "" {
+		cfg.LocalRouter = "127.0.0.1:28589"
+	}
 
 	totalCPUShares = cfg.CPUShares
 	availableCPUShares = int64(totalCPUShares)
@@ -161,8 +164,9 @@ func actionRun(c *cli.Context) error {
 		case restartMsg := <-restartCh:
 			namePo := restartMsg.GetOnePODF(bw2.PODFString)
 			if namePo != nil {
+				svcName := string(namePo.GetContents())
 				runningSvcsLock.Lock()
-				mfst, ok := runningServices[string(namePo.GetContents())]
+				mfst, ok := runningServices[svcName]
 				runningSvcsLock.Unlock()
 
 				if ok {
@@ -172,6 +176,8 @@ func actionRun(c *cli.Context) error {
 					} else {
 						go restartService(mfst, false)
 					}
+				} else {
+					olog <- SLM{Service: svcName, Message: "Service not found"}
 				}
 			}
 
@@ -186,7 +192,7 @@ func actionRun(c *cli.Context) error {
 
 func doOlog() {
 	for msg := range olog {
-		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLog{
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLogMsg{
 			Time:     time.Now().UnixNano(),
 			SPAlias:  cfg.Alias,
 			Service:  msg.Service,
