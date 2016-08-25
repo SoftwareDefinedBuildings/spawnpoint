@@ -107,9 +107,8 @@ func actionRun(c *cli.Context) error {
 	var err error
 	cfg, err = readConfigFromFile(c.String("config"))
 	if err != nil {
-		msg := "Config file error: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Config file error", err)
+		os.Exit(1)
 	}
 	if cfg.LocalRouter == "" {
 		cfg.LocalRouter = "127.0.0.1:28589"
@@ -120,25 +119,22 @@ func actionRun(c *cli.Context) error {
 	rawMem := cfg.MemAlloc
 	totalMem, err = parseMemAlloc(rawMem)
 	if err != nil {
-		msg := "Invalid Spawnpoint memory allocation: " + rawMem
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Invalid Spawnpoint memory allocation: " + rawMem)
+		os.Exit(1)
 	}
 	availableMem = int64(totalMem)
 
 	bwClient, err = initializeBosswave()
 	if err != nil {
-		msg := "Failed to initialize Bosswave router: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to initialize Bosswave router:", err)
+		os.Exit(1)
 	}
 
 	// Start docker connection
 	eventCh, err = ConnectDocker()
 	if err != nil {
-		msg := "Failed to connect to Docker: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to connect to Docker:", err)
+		os.Exit(1)
 	}
 	go monitorDockerEvents(&eventCh)
 

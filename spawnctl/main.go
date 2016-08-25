@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -155,16 +154,14 @@ func printLastSeen(lastSeen time.Time, name string, uri string) {
 func actionScan(c *cli.Context) error {
 	entityFile := c.GlobalString("entity")
 	if entityFile == "" {
-		msg := "No Bosswave entity specified"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("No Bosswave entity specified")
+		os.Exit(1)
 	}
 
 	baseuri := fixuri(c.String("uri"))
 	if len(baseuri) == 0 {
-		msg := "Missing 'uri' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
 	}
 	if strings.HasSuffix(baseuri, "/") {
 		baseuri += "*"
@@ -175,12 +172,12 @@ func actionScan(c *cli.Context) error {
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entityFile)
 	if err != nil {
 		fmt.Println("Failed to initialize spawn client:", err)
-		return err
+		os.Exit(1)
 	}
 	spawnPoints, err := spawnClient.Scan(baseuri)
 	if err != nil {
 		fmt.Println("Spawnpoint scan failed:", err)
-		return err
+		os.Exit(1)
 	}
 
 	fmt.Printf("Discovered %v SpawnPoints:\n", len(spawnPoints))
@@ -197,7 +194,7 @@ func actionScan(c *cli.Context) error {
 			svcs, err := spawnClient.Inspect(sp.URI)
 			if err != nil {
 				fmt.Println("Inspect failed:", err)
-				return err
+				os.Exit(1)
 			}
 
 			for _, svc := range svcs {
@@ -235,28 +232,24 @@ func actionTail(c *cli.Context) error {
 func issueServiceCommand(c *cli.Context, command string) error {
 	entity := c.GlobalString("entity")
 	if entity == "" {
-		msg := "Failed to specify entity file"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to specify entity file")
+		os.Exit(1)
 	}
 	uri := c.String("uri")
 	if uri == "" {
-		msg := "Failed to specify 'uri' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to specify 'uri' parameter")
+		os.Exit(1)
 	}
 	name := c.String("name")
 	if name == "" {
-		msg := "Failed to specify 'name' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to specify 'name' parameter")
+		os.Exit(1)
 	}
 
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
-		msg := "Failed to initialize spawn client: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to initialize spawn client:", err)
+		os.Exit(1)
 	}
 
 	var log chan *objects.SPLogMsg
@@ -269,9 +262,8 @@ func issueServiceCommand(c *cli.Context, command string) error {
 		log, err = spawnClient.TailService(uri, name)
 	}
 	if err != nil {
-		msg := "Failed to restart service: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to restart service:", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("%sMonitoring service log. Press Ctrl-C to quit.%s\n",
@@ -304,48 +296,42 @@ func parseConfig(filename string) (*objects.SvcConfig, error) {
 func actionDeploy(c *cli.Context) error {
 	entity := c.GlobalString("entity")
 	if entity == "" {
-		msg := "Missing 'entity' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Missing 'entity' parameter")
+		os.Exit(1)
 	}
 	spURI := fixuri(c.String("uri"))
 	if spURI == "" {
-		msg := "Missing 'uri' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
 	}
 	cfgFile := c.String("config")
 	if cfgFile == "" {
-		msg := "Missing 'config' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Missing 'config' parameter")
+		os.Exit(1)
 	}
 	svcName := c.String("name")
 	if svcName == "" {
-		msg := "Missing 'name' parameter"
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Missing 'name' parameter")
+		os.Exit(1)
 	}
 
 	svcConfig, err := parseConfig(cfgFile)
 	if err != nil {
-		msg := "Invalid service configuration file: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Invalid service configuration file:", err)
+		os.Exit(1)
 	}
 	svcConfig.ServiceName = svcName
 
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
-		msg := "Failed to initialize spawn client: " + err.Error()
-		fmt.Println(msg)
-		return errors.New(msg)
+		fmt.Println("Failed to initialize spawn client:", err)
+		os.Exit(1)
 	}
 	log, err := spawnClient.DeployService(svcConfig, spURI, svcName)
 	if err != nil {
 		fmt.Printf("%s[ERROR]%s Service deployment failed, %v", ansi.ColorCode("red+b"),
 			ansi.ColorCode("reset"), err)
-		return err
+		os.Exit(1)
 	}
 
 	fmt.Printf("%s Deployment complete, tailing log. Ctrl-C to quit.%s\n",
