@@ -20,7 +20,7 @@ func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName str
 		bwClient,
 		spAlias,
 		svcName,
-		uris.ServiceSignalPath(base, svcName, "log"),
+		uris.SignalPath(base, "log"),
 	}
 
 	return &logger

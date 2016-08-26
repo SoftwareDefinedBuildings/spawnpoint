@@ -72,7 +72,7 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 }
 
 func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, error) {
-	inspectURI := uris.ServiceSignalPath(spawnpointURI, "*", "heartbeat")
+	inspectURI := uris.SignalPath(spawnpointURI, "heartbeat/*")
 	svcHbMsgs, err := sc.bwClient.Query(&bw2.QueryParams{URI: inspectURI})
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func (sc *SpawnClient) TailService(baseURI string, name string) (chan *objects.S
 }
 
 func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string) (chan *objects.SPLogMsg, error) {
-	subURI := uris.ServiceSignalPath(baseURI, name, "log")
+	subURI := uris.SignalPath(baseURI, "log")
 	rawLog, err := sc.bwClient.Subscribe(&bw2.SubscribeParams{URI: subURI})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to suscribe to service log: %v", err)
@@ -127,7 +127,8 @@ func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string
 		for rawMsg := range rawLog {
 			if spLogPo := rawMsg.GetOnePODF(bw2.PODFSpawnpointLog); spLogPo != nil {
 				var logMsg objects.SPLogMsg
-				if err = spLogPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg); err == nil {
+				err = spLogPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
+				if err == nil && logMsg.Service == name {
 					log <- &logMsg
 				}
 			}
@@ -232,7 +233,7 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 	}
 
 	// Prepare channel to tail service's log
-	logURI := uris.ServiceSignalPath(spURI, config.ServiceName, "log")
+	logURI := uris.SignalPath(spURI, "log")
 	rawLog, err := sc.bwClient.Subscribe(&bw2.SubscribeParams{URI: logURI})
 	if err != nil {
 		return nil, fmt.Errorf("Failed to subscribe to service log: %v", err)
@@ -243,7 +244,8 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 			logPo := rawMsg.GetOnePODF(bw2.PODFSpawnpointLog)
 			if logPo != nil {
 				var logMsg objects.SPLogMsg
-				if err := logPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg); err == nil {
+				err = logPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
+				if err == nil && logMsg.Service == name {
 					log <- &logMsg
 				}
 			}

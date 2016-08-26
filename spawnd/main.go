@@ -13,7 +13,6 @@ import (
 
 	"github.com/codegangsta/cli"
 	"github.com/immesys/spawnpoint/objects"
-	"github.com/immesys/spawnpoint/uris"
 	"github.com/mgutz/ansi"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -24,6 +23,7 @@ import (
 var bwClient *bw2.BW2Client
 var cfg *DaemonConfig
 var olog chan SLM
+var spInterface *bw2.Interface
 
 var (
 	totalMem           uint64 // Memory dedicated to Spawnpoint, in MiB
@@ -65,6 +65,11 @@ func main() {
 					Usage: "Specify a configuration file for the daemon",
 					Value: "config.yml",
 				},
+				cli.StringFlag{
+					Name:  "metadata, m",
+					Usage: "Specify a file containing key/value metadata pairs",
+					Value: "",
+				},
 			},
 		},
 	}
@@ -84,6 +89,20 @@ func readConfigFromFile(fileName string) (*DaemonConfig, error) {
 		return nil, err
 	}
 	return &config, nil
+}
+
+func readMetadataFromFile(fileName string) (*map[string]string, error) {
+	mdContents, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata := make(map[string]string)
+	err = yaml.Unmarshal(mdContents, &metadata)
+	if err != nil {
+		return nil, err
+	}
+	return &metadata, nil
 }
 
 func initializeBosswave() (*bw2.BW2Client, error) {
@@ -130,6 +149,13 @@ func actionRun(c *cli.Context) error {
 		os.Exit(1)
 	}
 
+	// Register spawnpoint service and interfaces
+	spService := bwClient.RegisterService(cfg.Path, "s.spawnpoint")
+	spInterface = spService.RegisterInterface("server", "i.spawnpoint")
+	spInterface.SubscribeSlot("config", handleConfig)
+	spInterface.SubscribeSlot("restart", handleRestart)
+	spInterface.SubscribeSlot("stop", handleStop)
+
 	// Start docker connection
 	eventCh, err = ConnectDocker()
 	if err != nil {
@@ -142,51 +168,12 @@ func actionRun(c *cli.Context) error {
 	runningServices = make(map[string]*Manifest)
 	recoverPreviousState()
 
-	newCfgCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "config")})
-	restartCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "restart")})
-	stopCh := bwClient.SubscribeOrExit(&bw2.SubscribeParams{URI: uris.SlotPath(cfg.Path, "stop")})
-
-	go doOlog()
 	go heartbeat()
 	go persistManifests()
 	fmt.Printf("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
 		objects.SpawnpointVersion, ansi.ColorCode("reset"))
 
-	for {
-		select {
-		case cfg := <-newCfgCh:
-			handleConfig(cfg)
-
-		case restartMsg := <-restartCh:
-			namePo := restartMsg.GetOnePODF(bw2.PODFString)
-			if namePo != nil {
-				svcName := string(namePo.GetContents())
-				runningSvcsLock.Lock()
-				mfst, ok := runningServices[svcName]
-				runningSvcsLock.Unlock()
-
-				if ok {
-					if mfst.AutoRestart {
-						// Stop the container and let auto restart do the work for us
-						StopContainer(mfst.ServiceName, false)
-					} else {
-						go restartService(mfst, false)
-					}
-				} else {
-					olog <- SLM{Service: svcName, Message: "Service not found"}
-				}
-			}
-
-		case stopMsg := <-stopCh:
-			namePo := stopMsg.GetOnePODF(bw2.PODFString)
-			if namePo != nil {
-				stopService(string(namePo.GetContents()))
-			}
-		}
-	}
-}
-
-func doOlog() {
+	// Publish outgoing log messages
 	for msg := range olog {
 		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLogMsg{
 			Time:     time.Now().UnixNano(),
@@ -195,14 +182,18 @@ func doOlog() {
 			Contents: msg.Message,
 		})
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to construct log message:", err)
+			os.Exit(1)
 		}
 
-		bwClient.PublishOrExit(&bw2.PublishParams{
-			URI:            uris.ServiceSignalPath(cfg.Path, msg.Service, "log"),
-			PayloadObjects: []bw2.PayloadObject{po},
-		})
+		if err := spInterface.PublishSignal("log", po); err != nil {
+			fmt.Println("Failed to publish log message:", err)
+			os.Exit(1)
+		}
 	}
+
+	// Not reached
+	return nil
 }
 
 func heartbeat() {
@@ -222,18 +213,15 @@ func heartbeat() {
 			AvailableMem:       mem,
 			AvailableCPUShares: shares,
 		}
-		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, msg)
+		hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, msg)
 		if err != nil {
 			panic(err)
-		} else {
-			hburi := uris.SignalPath(cfg.Path, "heartbeat")
-			bwClient.PublishOrExit(&bw2.PublishParams{
-				URI:            hburi,
-				Persist:        true,
-				PayloadObjects: []bw2.PayloadObject{po},
-			})
 		}
 
+		err = spInterface.PublishSignal("heartbeat", hbPo)
+		if err != nil {
+			panic(err)
+		}
 		time.Sleep(heartbeatPeriod * time.Second)
 	}
 }
@@ -272,7 +260,6 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 				lastCPUPercentage = (containerCPUDelta / systemCPUDelta) * numCores * 100.0
 			}
 
-			hburi := uris.ServiceSignalPath(cfg.Path, svcname, "heartbeat")
 			msg := objects.SpawnpointSvcHb{
 				SpawnpointURI: cfg.Path,
 				Name:          svcname,
@@ -287,16 +274,14 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 				CPUPercent:    lastCPUPercentage,
 			}
 
-			po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
+			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
 			if err != nil {
 				panic(err)
 			}
-
-			bwClient.PublishOrExit(&bw2.PublishParams{
-				URI:            hburi,
-				Persist:        true,
-				PayloadObjects: []bw2.PayloadObject{po},
-			})
+			err = spInterface.PublishSignal("heartbeat/"+svcname, hbPo)
+			if err != nil {
+				panic(err)
+			}
 
 			lastEmitted = time.Now()
 		}
@@ -344,27 +329,21 @@ func restartService(mfst *Manifest, initialBoot bool) {
 	}
 }
 
-func stopService(serviceName string) {
-	olog <- SLM{serviceName, "attempting to stop container"}
-	runningSvcsLock.Lock()
-	for name, manifest := range runningServices {
-		if name == serviceName {
-			// We don't want this work to be undone by event monitoring
-			manifest.AutoRestart = false
+func stopService(mfst *Manifest) {
+	olog <- SLM{mfst.ServiceName, "attempting to stop container"}
+	// We don't want this work to be undone by event monitoring
+	mfst.AutoRestart = false
 
-			// Updating available mem and cpu shares done by event monitor
-			err := StopContainer(manifest.ServiceName, true)
-			if err != nil {
-				msg := "Failed to stop container: " + err.Error()
-				olog <- SLM{serviceName, msg}
-				fmt.Println(msg)
-			} else {
-				// Log message will be output by docker event monitor
-				fmt.Println("Container stopped successfully")
-			}
-		}
+	// Updating available mem and cpu shares done by event monitor
+	err := StopContainer(mfst.ServiceName, true)
+	if err != nil {
+		msg := "Failed to stop container: " + err.Error()
+		olog <- SLM{mfst.ServiceName, msg}
+		fmt.Println(msg)
+	} else {
+		// Log message will be output by docker event monitor
+		fmt.Println("Container stopped successfully")
 	}
-	runningSvcsLock.Unlock()
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
@@ -450,7 +429,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 	// Remove previous service version if necessary
 	if ok {
 		olog <- SLM{config.ServiceName, "Removing old version"}
-		stopService(config.ServiceName)
+		stopService(existingManifest)
 	}
 
 	mf := Manifest{
@@ -469,6 +448,43 @@ func handleConfig(m *bw2.SimpleMessage) {
 
 	go restartService(&mf, true)
 
+}
+
+func handleRestart(msg *bw2.SimpleMessage) {
+	namePo := msg.GetOnePODF(bw2.PODFString)
+	if namePo != nil {
+		svcName := string(namePo.GetContents())
+		runningSvcsLock.Lock()
+		mfst, ok := runningServices[svcName]
+		runningSvcsLock.Unlock()
+
+		if ok {
+			if mfst.AutoRestart {
+				// Stop the container and let auto restart do the work for us
+				StopContainer(mfst.ServiceName, false)
+			} else {
+				go restartService(mfst, false)
+			}
+		} else {
+			olog <- SLM{Service: svcName, Message: "Service not found"}
+		}
+	}
+}
+
+func handleStop(msg *bw2.SimpleMessage) {
+	namePo := msg.GetOnePODF(bw2.PODFString)
+	if namePo != nil {
+		svcName := string(namePo.GetContents())
+		runningSvcsLock.Lock()
+		mfst, ok := runningServices[svcName]
+		runningSvcsLock.Unlock()
+
+		if ok {
+			stopService(mfst)
+		} else {
+			olog <- SLM{Service: svcName, Message: "Service not found"}
+		}
+	}
 }
 
 func parseMemAlloc(alloc string) (uint64, error) {
@@ -595,15 +611,11 @@ func persistManifests() {
 		}
 		runningSvcsLock.Unlock()
 
-		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, manifests)
+		mfstPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, manifests)
 		if err != nil {
 			fmt.Println("Failed to marshal manifests for persistence")
 		} else {
-			bwClient.Publish(&bw2.PublishParams{
-				URI:            uris.SignalPath(cfg.Path, "manifests"),
-				Persist:        true,
-				PayloadObjects: []bw2.PayloadObject{po},
-			})
+			spInterface.PublishSignal("manifests", mfstPo)
 		}
 
 		time.Sleep(persistManifestPeriod * time.Second)
@@ -612,7 +624,7 @@ func persistManifests() {
 
 func recoverPreviousState() {
 	mfstMsg := bwClient.QueryOneOrExit(&bw2.QueryParams{
-		URI: uris.SignalPath(cfg.Path, "manifests"),
+		URI: spInterface.SignalURI("manifests"),
 	})
 	if mfstMsg == nil {
 		return
