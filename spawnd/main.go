@@ -156,6 +156,18 @@ func actionRun(c *cli.Context) error {
 	spInterface.SubscribeSlot("restart", handleRestart)
 	spInterface.SubscribeSlot("stop", handleStop)
 
+	// Set Spawnpoint metadata
+	if c.String("metadata") != "" {
+		metadata, err := readMetadataFromFile(c.String("metadata"))
+		if err != nil {
+			fmt.Println("Invalid metadata file:", err)
+			os.Exit(1)
+		}
+		for mdKey, mdVal := range *metadata {
+			spService.SetMetadata(mdKey, mdVal)
+		}
+	}
+
 	// Start docker connection
 	eventCh, err = ConnectDocker()
 	if err != nil {
