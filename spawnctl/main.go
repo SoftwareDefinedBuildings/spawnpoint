@@ -191,17 +191,23 @@ func actionScan(c *cli.Context) error {
 	if len(spawnPoints) == 1 {
 		// Print detailed information about single spawnpoint
 		for _, sp := range spawnPoints {
-			svcs, err := spawnClient.Inspect(sp.URI)
+			svcs, metadata, err := spawnClient.Inspect(sp.URI)
 			if err != nil {
 				fmt.Println("Inspect failed:", err)
 				os.Exit(1)
 			}
 
 			for _, svc := range svcs {
-				fmt.Print("    ")
+				fmt.Print("• ")
 				printLastSeen(svc.LastSeen, svc.Name, "")
-				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n",
-					svc.MemAlloc, svc.CPUShares)
+				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
+			}
+
+			if len(metadata) > 0 {
+				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
+				for key, tuple := range metadata {
+					fmt.Printf("• %s : %s\n", key, tuple.Value)
+				}
 			}
 		}
 	}

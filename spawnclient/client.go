@@ -35,9 +35,10 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	return &SpawnClient{bwClient: BWC}, nil
 }
 
-func (sc *SpawnClient) newIfcClient(spURI string) *bw2.InterfaceClient {
+func (sc *SpawnClient) newIfcClient(spURI string) (*bw2.ServiceClient, *bw2.InterfaceClient) {
 	svcClient := sc.bwClient.NewServiceClient(spURI, "s.spawnpoint")
-	return svcClient.AddInterface("server", "i.spawnpoint")
+	ifcClient := svcClient.AddInterface("server", "i.spawnpoint")
+	return svcClient, ifcClient
 }
 
 func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, error) {
@@ -78,15 +79,15 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 	return spawnpoints, nil
 }
 
-func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, error) {
-	ifcClient := sc.newIfcClient(spawnpointURI)
+func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, map[string]*bw2.MetadataTuple, error) {
+	svcClient, ifcClient := sc.newIfcClient(spawnpointURI)
+
 	svcHbMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
 		URI: ifcClient.SignalURI("heartbeat/*"),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
 	var svcs []objects.Service
 	for svcHbMsg := range svcHbMsgs {
 		for _, po := range svcHbMsg.POs {
@@ -110,7 +111,12 @@ func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, error) 
 		}
 	}
 
-	return svcs, nil
+	metadata, err := svcClient.GetMetadata()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return svcs, metadata, nil
 }
 
 func (sc *SpawnClient) RestartService(baseURI string, name string) (chan *objects.SPLogMsg, error) {
@@ -137,7 +143,7 @@ func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string
 		}
 	}
 
-	spInterface := sc.newIfcClient(baseURI)
+	_, spInterface := sc.newIfcClient(baseURI)
 	err := spInterface.SubscribeSignal("log", callback)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to subcribe to service log: %v", err)
@@ -223,7 +229,7 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 	}
 
 	// Prepare channel to tail service's log
-	ifcClient := sc.newIfcClient(spURI)
+	_, ifcClient := sc.newIfcClient(spURI)
 	log := make(chan *objects.SPLogMsg)
 	callback := func(msg *bw2.SimpleMessage) {
 		if logPo := msg.GetOnePODF(bw2.PODFSpawnpointLog); logPo != nil {
