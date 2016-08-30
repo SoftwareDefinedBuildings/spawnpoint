@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/immesys/spawnpoint/objects"
-	"github.com/immesys/spawnpoint/uris"
 	"github.com/jhoonb/archivex"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
@@ -36,9 +35,17 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	return &SpawnClient{bwClient: BWC}, nil
 }
 
+func (sc *SpawnClient) newIfcClient(spURI string) *bw2.InterfaceClient {
+	svcClient := sc.bwClient.NewServiceClient(spURI, "s.spawnpoint")
+	return svcClient.AddInterface("server", "i.spawnpoint")
+}
+
 func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, error) {
-	scanuri := uris.SignalPath(baseURI, "heartbeat")
-	heartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{URI: scanuri})
+	svcClient := sc.bwClient.NewServiceClient(baseURI, "s.spawnpoint")
+	ifcClient := svcClient.AddInterface("server", "i.spawnpoint")
+	heartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
+		URI: ifcClient.SignalURI("heartbeat"),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +79,10 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 }
 
 func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, error) {
-	inspectURI := uris.SignalPath(spawnpointURI, "heartbeat/*")
-	svcHbMsgs, err := sc.bwClient.Query(&bw2.QueryParams{URI: inspectURI})
+	ifcClient := sc.newIfcClient(spawnpointURI)
+	svcHbMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
+		URI: ifcClient.SignalURI("heartbeat/*"),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -117,30 +126,26 @@ func (sc *SpawnClient) TailService(baseURI string, name string) (chan *objects.S
 }
 
 func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string) (chan *objects.SPLogMsg, error) {
-	subURI := uris.SignalPath(baseURI, "log")
-	rawLog, err := sc.bwClient.Subscribe(&bw2.SubscribeParams{URI: subURI})
-	if err != nil {
-		return nil, fmt.Errorf("Failed to suscribe to service log: %v", err)
-	}
 	log := make(chan *objects.SPLogMsg)
-	go func() {
-		for rawMsg := range rawLog {
-			if spLogPo := rawMsg.GetOnePODF(bw2.PODFSpawnpointLog); spLogPo != nil {
-				var logMsg objects.SPLogMsg
-				err = spLogPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
-				if err == nil && logMsg.Service == name {
-					log <- &logMsg
-				}
+	callback := func(msg *bw2.SimpleMessage) {
+		if spLogPo := msg.GetOnePODF(bw2.PODFSpawnpointLog); spLogPo != nil {
+			var logMsg objects.SPLogMsg
+			err := spLogPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
+			if err == nil && logMsg.Service == name {
+				log <- &logMsg
 			}
 		}
-	}()
+	}
+
+	spInterface := sc.newIfcClient(baseURI)
+	err := spInterface.SubscribeSignal("log", callback)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to subcribe to service log: %v", err)
+	}
 
 	if cmd == "restart" || cmd == "stop" {
 		po := bw2.CreateStringPayloadObject(name)
-		err = sc.bwClient.Publish(&bw2.PublishParams{
-			URI:            uris.SlotPath(baseURI, cmd),
-			PayloadObjects: []bw2.PayloadObject{po},
-		})
+		err = spInterface.PublishSlot(cmd, po)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to publish request: %v", err)
 		}
@@ -217,6 +222,22 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 		return nil, fmt.Errorf("Spawnpoint %s appears down", spURI)
 	}
 
+	// Prepare channel to tail service's log
+	ifcClient := sc.newIfcClient(spURI)
+	log := make(chan *objects.SPLogMsg)
+	callback := func(msg *bw2.SimpleMessage) {
+		if logPo := msg.GetOnePODF(bw2.PODFSpawnpointLog); logPo != nil {
+			var logMsg objects.SPLogMsg
+			err = logPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
+			if err == nil && logMsg.Service == name {
+				log <- &logMsg
+			}
+		}
+	}
+	if err = ifcClient.SubscribeSignal("log", callback); err != nil {
+		return nil, fmt.Errorf("Failed to subscribe to log: %v", err)
+	}
+
 	// Prepare payload objects
 	pos := make([]bw2.PayloadObject, 1)
 	configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
@@ -232,30 +253,8 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 		pos = append(pos, bw2.CreateStringPayloadObject(includeEnc))
 	}
 
-	// Prepare channel to tail service's log
-	logURI := uris.SignalPath(spURI, "log")
-	rawLog, err := sc.bwClient.Subscribe(&bw2.SubscribeParams{URI: logURI})
-	if err != nil {
-		return nil, fmt.Errorf("Failed to subscribe to service log: %v", err)
+	if err = ifcClient.PublishSlot("config", pos...); err != nil {
+		return nil, fmt.Errorf("Failed to publish configuration: %v", err)
 	}
-	log := make(chan *objects.SPLogMsg)
-	go func() {
-		for rawMsg := range rawLog {
-			logPo := rawMsg.GetOnePODF(bw2.PODFSpawnpointLog)
-			if logPo != nil {
-				var logMsg objects.SPLogMsg
-				err = logPo.(bw2.MsgPackPayloadObject).ValueInto(&logMsg)
-				if err == nil && logMsg.Service == name {
-					log <- &logMsg
-				}
-			}
-		}
-	}()
-
-	configURI := uris.SlotPath(spURI, "config")
-	if err := sc.bwClient.Publish(&bw2.PublishParams{URI: configURI, PayloadObjects: pos}); err != nil {
-		return nil, fmt.Errorf("Failed to publish config to spawnpoint: %v", err)
-	}
-
 	return log, nil
 }

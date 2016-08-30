@@ -4,23 +4,22 @@ import (
 	"time"
 
 	"github.com/immesys/spawnpoint/objects"
-	"github.com/immesys/spawnpoint/uris"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
 
 type BWLogger struct {
-	bwClient *bw2.BW2Client
-	spAlias  string
-	svcName  string
-	uri      string
+	ifcClient *bw2.InterfaceClient
+	spAlias   string
+	svcName   string
 }
 
 func NewLogger(bwClient *bw2.BW2Client, base string, spAlias string, svcName string) *BWLogger {
+	svcClient := bwClient.NewServiceClient(base, "s.spawnpoint")
+	ifcClient := svcClient.AddInterface("server", "i.spawnpoint")
 	logger := BWLogger{
-		bwClient,
+		ifcClient,
 		spAlias,
 		svcName,
-		uris.SignalPath(base, "log"),
 	}
 
 	return &logger
@@ -38,7 +37,7 @@ func (logger BWLogger) Write(msg []byte) (int, error) {
 	}
 
 	err = bwClient.Publish(&bw2.PublishParams{
-		URI:            logger.uri,
+		URI:            logger.ifcClient.SignalURI("log"),
 		PayloadObjects: []bw2.PayloadObject{po},
 	})
 	if err != nil {
