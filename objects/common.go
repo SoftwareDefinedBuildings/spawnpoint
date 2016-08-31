@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const SpawnpointVersion = "0.1.2"
+const SpawnpointVersion = "0.1.3"
 
 type SpawnPointHb struct {
 	Alias              string
