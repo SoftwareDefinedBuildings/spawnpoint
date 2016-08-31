@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -136,7 +135,7 @@ func actionRun(c *cli.Context) error {
 	totalCPUShares = cfg.CPUShares
 	availableCPUShares = int64(totalCPUShares)
 	rawMem := cfg.MemAlloc
-	totalMem, err = parseMemAlloc(rawMem)
+	totalMem, err = objects.ParseMemAlloc(rawMem)
 	if err != nil {
 		fmt.Println("Invalid Spawnpoint memory allocation: " + rawMem)
 		os.Exit(1)
@@ -384,7 +383,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		panic(err)
 	}
 	rawMem := config.MemAlloc
-	memAlloc, err := parseMemAlloc(rawMem)
+	memAlloc, err := objects.ParseMemAlloc(rawMem)
 	if err != nil {
 		panic(err)
 	}
@@ -497,26 +496,6 @@ func handleStop(msg *bw2.SimpleMessage) {
 			olog <- SLM{Service: svcName, Message: "Service not found"}
 		}
 	}
-}
-
-func parseMemAlloc(alloc string) (uint64, error) {
-	if alloc == "" {
-		return 0, errors.New("No memory allocation in config")
-	}
-	suffix := alloc[len(alloc)-1:]
-	memAlloc, err := strconv.ParseUint(alloc[:len(alloc)-1], 0, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	if suffix == "G" || suffix == "g" {
-		memAlloc *= 1024
-	} else if suffix != "M" && suffix != "m" {
-		err = errors.New("Memory allocation amount must be in units of M or G")
-		return 0, err
-	}
-
-	return memAlloc, nil
 }
 
 func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]string, error) {

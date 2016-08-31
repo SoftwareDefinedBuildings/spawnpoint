@@ -1,6 +1,8 @@
 package objects
 
 import (
+	"errors"
+	"strconv"
 	"time"
 )
 
@@ -54,6 +56,26 @@ func (sp *SpawnPoint) Good() bool {
 
 func IsSpawnPointGood(lastSeen time.Time) bool {
 	return time.Now().Sub(lastSeen) < 10*time.Second
+}
+
+func ParseMemAlloc(alloc string) (uint64, error) {
+	if alloc == "" {
+		return 0, errors.New("No memory allocation in config")
+	}
+	suffix := alloc[len(alloc)-1:]
+	memAlloc, err := strconv.ParseUint(alloc[:len(alloc)-1], 0, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	if suffix == "G" || suffix == "g" {
+		memAlloc *= 1024
+	} else if suffix != "M" && suffix != "m" {
+		err = errors.New("Memory allocation amount must be in units of M or G")
+		return 0, err
+	}
+
+	return memAlloc, nil
 }
 
 type SPLogMsg struct {

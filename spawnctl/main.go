@@ -200,13 +200,13 @@ func actionScan(c *cli.Context) error {
 			for _, svc := range svcs {
 				fmt.Print("• ")
 				printLastSeen(svc.LastSeen, svc.Name, "")
-				fmt.Printf("        Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
+				fmt.Printf("    Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
 			}
 
 			if len(metadata) > 0 {
 				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 				for key, tuple := range metadata {
-					fmt.Printf("• %s : %s\n", key, tuple.Value)
+					fmt.Printf("  • %s: %s\n", key, tuple.Value)
 				}
 			}
 		}
