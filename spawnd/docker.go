@@ -116,12 +116,9 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	if err != nil {
 		fmt.Printf("Failed to set up container volumes: %v\n", err)
 	}
-	portBindings := make(map[docker.Port][]docker.PortBinding)
-	if strings.HasPrefix(bwRouter, "localhost:") || strings.HasPrefix(bwRouter, "127.0.0.1:") {
-		bwPortNum := bwRouter[strings.Index(bwRouter, ":")+1:]
-		containerPort := docker.Port(bwPortNum + "/tcp")
-		hostPort := docker.PortBinding{HostPort: bwPortNum}
-		portBindings[containerPort] = []docker.PortBinding{hostPort}
+	envVars := []string{"BW2_DEFAULT_ENTITY=/srv/spawnpoint/entity.key"}
+	if bwRouter != "" {
+		envVars = append(envVars, "BW2_AGENT="+bwRouter)
 	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
@@ -131,17 +128,15 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 			OnBuild:      cfg.Build,
 			Cmd:          cfg.Run,
 			Image:        imgname,
-			Env:          []string{"BW2_DEFAULT_ENTITY=/srv/spawnpoint/entity.key"},
+			Env:          envVars,
 			Mounts:       mounts,
 			AttachStdout: true,
 			AttachStderr: true,
 			AttachStdin:  true,
 		},
 		HostConfig: &docker.HostConfig{
-			NetworkMode:  "host",
-			Memory:       int64(cfg.MemAlloc) * 1024 * 1024,
-			CPUShares:    int64(cfg.CPUShares),
-			PortBindings: portBindings,
+			Memory:    int64(cfg.MemAlloc) * 1024 * 1024,
+			CPUShares: int64(cfg.CPUShares),
 		},
 	})
 	if err != nil {

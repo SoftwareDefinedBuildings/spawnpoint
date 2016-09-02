@@ -19,9 +19,6 @@ type SpawnClient struct {
 }
 
 func New(router string, entityFile string) (*SpawnClient, error) {
-	if router == "" {
-		router = "localhost:28589"
-	}
 	BWC, err := bw2.Connect(router)
 	if err != nil {
 		return nil, err

@@ -1,6 +1,6 @@
 entity: /home/jack/bosswave/keys/jackDev.ent
 container: immesys/spawnpoint:amd64
-source: git+http://github.com/jkolb1/demosvc
+source: git+http://github.com/jhkolb/demosvc
 build: [go get -d, go build -o demosvc]
 run: [./demosvc, 100]
 memAlloc: 512M

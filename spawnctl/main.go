@@ -26,7 +26,7 @@ func main() {
 		cli.StringFlag{
 			Name:  "router, r",
 			Usage: "set the local router",
-			Value: "127.0.0.1:28589",
+			Value: "",
 		},
 		cli.StringFlag{
 			Name:   "entity, e",

@@ -1,5 +1,7 @@
-entity: /home/jack/bosswave/keys/jackDev.ent
+entity: /etc/spawnd/jackDev.ent
 path: jkolb/spawnpoint/alpha
 alias: alpha
 memAlloc: 2G
 cpuShares: 2048
+localRouter: 172.17.0.1:28589
+containerRouter: 172.17.0.1:28589

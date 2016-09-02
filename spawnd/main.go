@@ -128,9 +128,6 @@ func actionRun(c *cli.Context) error {
 		fmt.Println("Config file error", err)
 		os.Exit(1)
 	}
-	if cfg.LocalRouter == "" {
-		cfg.LocalRouter = "127.0.0.1:28589"
-	}
 
 	totalCPUShares = cfg.CPUShares
 	availableCPUShares = int64(totalCPUShares)
@@ -311,7 +308,7 @@ func restartService(mfst *Manifest, initialBoot bool) {
 		mfst.logger = logger
 	}
 
-	cnt, err := RestartContainer(mfst, cfg.LocalRouter, initialBoot)
+	cnt, err := RestartContainer(mfst, cfg.ContainerRouter, initialBoot)
 	if err != nil {
 		msg := fmt.Sprintf("Container (re)start failed: %v", err)
 		olog <- SLM{mfst.ServiceName, msg}
