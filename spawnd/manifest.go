@@ -15,4 +15,5 @@ type Manifest struct {
 	Container     *SpawnPointContainer
 	Volumes       []string
 	logger        *BWLogger
+	OverlayNet    string
 }

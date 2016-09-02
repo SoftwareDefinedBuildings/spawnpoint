@@ -120,6 +120,10 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	if bwRouter != "" {
 		envVars = append(envVars, "BW2_AGENT="+bwRouter)
 	}
+	netMode := "bridge"
+	if cfg.OverlayNet != "" {
+		netMode = cfg.OverlayNet
+	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
 		Name: "spawnpoint_" + cfg.ServiceName,
@@ -135,8 +139,9 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 			AttachStdin:  true,
 		},
 		HostConfig: &docker.HostConfig{
-			Memory:    int64(cfg.MemAlloc) * 1024 * 1024,
-			CPUShares: int64(cfg.CPUShares),
+			NetworkMode: netMode,
+			Memory:      int64(cfg.MemAlloc) * 1024 * 1024,
+			CPUShares:   int64(cfg.CPUShares),
 		},
 	})
 	if err != nil {

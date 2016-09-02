@@ -452,6 +452,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 		RestartInt:    restartWaitDur,
 		Volumes:       config.Volumes,
 		logger:        NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName),
+		OverlayNet:    config.OverlayNet,
 	}
 
 	go restartService(&mf, true)
