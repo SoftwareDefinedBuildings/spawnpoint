@@ -16,6 +16,8 @@ import (
 	"github.com/mgutz/ansi"
 )
 
+const timeCutoff = 30 * time.Second
+
 func main() {
 	app := cli.NewApp()
 	app.Name = "spawnctl"
@@ -180,7 +182,7 @@ func actionScan(c *cli.Context) error {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Discovered %v SpawnPoints:\n", len(spawnPoints))
+	fmt.Printf("Discovered %v SpawnPoint(s):\n", len(spawnPoints))
 	// Print out status information on all discovered spawnpoints
 	for _, sp := range spawnPoints {
 		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
@@ -198,15 +200,19 @@ func actionScan(c *cli.Context) error {
 			}
 
 			for _, svc := range svcs {
-				fmt.Print("• ")
-				printLastSeen(svc.LastSeen, svc.Name, "")
-				fmt.Printf("    Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
+				if time.Now().Sub(svc.LastSeen) < timeCutoff {
+					fmt.Print("• ")
+					printLastSeen(svc.LastSeen, svc.Name, "")
+					fmt.Printf("    Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
+				}
 			}
 
 			if len(metadata) > 0 {
 				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 				for key, tuple := range metadata {
-					fmt.Printf("  • %s: %s\n", key, tuple.Value)
+					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < timeCutoff {
+						fmt.Printf("  • %s: %s\n", key, tuple.Value)
+					}
 				}
 			}
 		}
