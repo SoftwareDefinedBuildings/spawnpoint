@@ -5,14 +5,14 @@ After=bw2.service
 [Service]
 Restart=always
 RestartSec=1m
-ExecStartPre=/usr/bin/docker pull jhkolb/spawnd
+ExecStartPre=/usr/bin/docker pull jhkolb/spawnd:armv7
 TimeoutStartSec=10m
 
 ExecStart=/bin/bash -c 'docker run \
     --name %p \
     -v /etc/spawnd/:/etc/spawnd/ \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    jhkolb/spawnd'
+    jhkolb/spawnd:armv7'
 
 ExecStop=/usr/bin/docker stop -t 10 %p ; /usr/bin/docker rm -f %p
 
