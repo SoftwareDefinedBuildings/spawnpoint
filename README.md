@@ -51,6 +51,7 @@ Once `etcd` is running, you will also need to pass configuration flags to the
 docker Daemon when it is started. The steps to achieve this vary by platform. On
 Ubuntu, for example, you will need to edit the `docker.service` file used by
 `systemd`. The two required configuration flags are:
+
 1. `cluster-store`: The address and port of the key/value to use for overlay
    networking, e.g. `etcd://foo.bar:4001`
 2. `cluster-advertise`: An address and port that can be used to reach the Docker
@@ -122,6 +123,7 @@ that can be used to run the Spawnpoint daemon as a Docker container. The
 `systemd` unit file contained in this GitHub repo provides an example of using
 the container. In particular, you will need to map two volumes for the
 container:
+
 1. `/etc/spawnd`: This is where the container will look for YAML configuration
    and metadata files.
 2. `/var/run/docker.sock`: This gives the Spawnpoint container access to the
