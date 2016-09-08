@@ -103,7 +103,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	}
 
 	// Then rebuild image if necessary
-	imgname := "spawnpoint_" + cfg.ServiceName
+	imgname := "spawnpoint_image_" + cfg.ServiceName
 	if rebuildImg {
 		err = rebuildImage(cfg, imgname)
 		if err != nil {
@@ -123,6 +123,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	netMode := "bridge"
 	if cfg.OverlayNet != "" {
 		netMode = cfg.OverlayNet
+		createNetIfNecessary(cfg.OverlayNet)
 	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
@@ -175,7 +176,7 @@ func rebuildImage(cfg *Manifest, imgname string) error {
 		return err
 	}
 
-	dfile := []string{"FROM immesys/spawnpoint:amd64"}
+	dfile := []string{"FROM " + cfg.ContainerType}
 	dfile = append(dfile, cfg.Build...)
 
 	tdir, err := ioutil.TempDir("", "spawnpoint")
@@ -253,4 +254,23 @@ func collectStats(container *docker.Container) *chan (*docker.Stats) {
 	})
 
 	return &statChan
+}
+
+func createNetIfNecessary(netName string) error {
+	networks, err := dkr.ListNetworks()
+	if err != nil {
+		return err
+	}
+
+	for _, network := range networks {
+		if network.Name == netName {
+			return nil
+		}
+	}
+
+	_, err = dkr.CreateNetwork(docker.CreateNetworkOptions{
+		Name:   netName,
+		Driver: "overlay",
+	})
+	return err
 }

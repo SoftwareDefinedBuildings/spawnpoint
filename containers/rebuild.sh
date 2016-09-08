@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-${REPO_PREFIX:=immesys}
+${REPO_PREFIX:=jhkolb}
 
 # Spawnable amd64
 pushd spawnable/amd64
