@@ -159,9 +159,14 @@ func actionRun(c *cli.Context) error {
 			fmt.Println("Invalid metadata file:", err)
 			os.Exit(1)
 		}
-		for mdKey, mdVal := range *metadata {
-			spService.SetMetadata(mdKey, mdVal)
-		}
+		go func() {
+			for {
+				for mdKey, mdVal := range *metadata {
+					spService.SetMetadata(mdKey, mdVal)
+				}
+				time.Sleep(1 * time.Minute)
+			}
+		}()
 	}
 
 	// Start docker connection

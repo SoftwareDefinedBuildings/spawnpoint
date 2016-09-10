@@ -16,7 +16,7 @@ import (
 	"github.com/mgutz/ansi"
 )
 
-const timeCutoff = 30 * time.Second
+const timeCutoff = 2 * time.Minute
 
 func main() {
 	app := cli.NewApp()
