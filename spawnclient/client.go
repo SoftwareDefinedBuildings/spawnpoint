@@ -26,7 +26,6 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	BWC.StatLine()
 
 	_, err = BWC.SetEntityFile(entityFile)
 	if err != nil {
@@ -34,6 +33,10 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	}
 
 	return &SpawnClient{bwClient: BWC}, nil
+}
+
+func (sc *SpawnClient) BWStatus() {
+	sc.bwClient.StatLine()
 }
 
 func (sc *SpawnClient) newIfcClient(spURI string) (*bw2.ServiceClient, *bw2.InterfaceClient) {

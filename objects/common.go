@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const SpawnpointVersion = "0.1.4"
+const SpawnpointVersion = "0.2.0"
 const SharesPerCore = 1024
 
 type SpawnPointHb struct {

@@ -261,7 +261,7 @@ func actionScan(c *cli.Context) error {
 				if time.Now().Sub(svc.LastSeen) < timeCutoff {
 					fmt.Print("  • ")
 					printLastSeen(svc.LastSeen, svc.Name, "")
-					fmt.Printf("      Memory: %.2f/%d MB, Cpu Shares: ~%d/%d\n", svc.MemUsage, svc.MemAlloc,
+					fmt.Printf("      Memory: %.2f/%d MB, CPU Shares: ~%d/%d\n", svc.MemUsage, svc.MemAlloc,
 						svc.CPUShareUsage, svc.CPUShares)
 				}
 			}
