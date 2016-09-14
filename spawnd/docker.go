@@ -176,7 +176,7 @@ func rebuildImage(cfg *Manifest, imgname string) error {
 		return err
 	}
 
-	dfile := []string{"FROM " + cfg.ContainerType}
+	dfile := []string{"FROM " + cfg.Image}
 	dfile = append(dfile, cfg.Build...)
 
 	tdir, err := ioutil.TempDir("", "spawnpoint")

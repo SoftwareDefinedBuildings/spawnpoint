@@ -41,6 +41,7 @@ var eventCh chan *docker.APIEvents
 
 const heartbeatPeriod = 5
 const persistManifestPeriod = 10
+const defaultSpawnpointImage = "jhkolb/spawnpoint:amd64"
 
 type SLM struct {
 	Service string
@@ -384,6 +385,11 @@ func handleConfig(m *bw2.SimpleMessage) {
 	if err != nil {
 		panic(err)
 	}
+
+	if config.Image == "" {
+		config.Image = defaultSpawnpointImage
+	}
+
 	rawMem := config.MemAlloc
 	memAlloc, err := objects.ParseMemAlloc(rawMem)
 	if err != nil {
@@ -446,18 +452,18 @@ func handleConfig(m *bw2.SimpleMessage) {
 	}
 
 	mf := Manifest{
-		ServiceName:   config.ServiceName,
-		Entity:        econtents,
-		ContainerType: config.Container,
-		MemAlloc:      memAlloc,
-		CPUShares:     config.CPUShares,
-		Build:         buildcontents,
-		Run:           config.Run,
-		AutoRestart:   config.AutoRestart,
-		RestartInt:    restartWaitDur,
-		Volumes:       config.Volumes,
-		logger:        NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName),
-		OverlayNet:    config.OverlayNet,
+		ServiceName: config.ServiceName,
+		Entity:      econtents,
+		Image:       config.Image,
+		MemAlloc:    memAlloc,
+		CPUShares:   config.CPUShares,
+		Build:       buildcontents,
+		Run:         config.Run,
+		AutoRestart: config.AutoRestart,
+		RestartInt:  restartWaitDur,
+		Volumes:     config.Volumes,
+		logger:      NewLogger(bwClient, cfg.Path, cfg.Alias, config.ServiceName),
+		OverlayNet:  config.OverlayNet,
 	}
 
 	go restartService(&mf, true)
@@ -591,16 +597,16 @@ func persistManifests() {
 		for _, mfstPtr := range runningServices {
 			// Make a deep copy
 			manifests[i] = Manifest{
-				ServiceName:   mfstPtr.ServiceName,
-				Entity:        mfstPtr.Entity,
-				ContainerType: mfstPtr.ContainerType,
-				MemAlloc:      mfstPtr.MemAlloc,
-				CPUShares:     mfstPtr.CPUShares,
-				Build:         mfstPtr.Build,
-				Run:           mfstPtr.Run,
-				AutoRestart:   mfstPtr.AutoRestart,
-				RestartInt:    mfstPtr.RestartInt,
-				Volumes:       mfstPtr.Volumes,
+				ServiceName: mfstPtr.ServiceName,
+				Entity:      mfstPtr.Entity,
+				Image:       mfstPtr.Image,
+				MemAlloc:    mfstPtr.MemAlloc,
+				CPUShares:   mfstPtr.CPUShares,
+				Build:       mfstPtr.Build,
+				Run:         mfstPtr.Run,
+				AutoRestart: mfstPtr.AutoRestart,
+				RestartInt:  mfstPtr.RestartInt,
+				Volumes:     mfstPtr.Volumes,
 			}
 		}
 		runningSvcsLock.Unlock()

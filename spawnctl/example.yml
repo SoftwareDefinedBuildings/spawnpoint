@@ -1,5 +1,5 @@
 entity: /home/jack/bosswave/keys/jackDev.ent
-container: jhkolb/spawnpoint:amd64
+image: jhkolb/spawnpoint:amd64
 source: git+http://github.com/jhkolb/demosvc
 build: [go get -d, go build -o demosvc]
 run: [./demosvc, 100]

@@ -20,7 +20,7 @@ type SpawnPointHb struct {
 type SvcConfig struct {
 	ServiceName   string   `yaml:"serviceName"`
 	Entity        string   `yaml:"entity"`
-	Container     string   `yaml:"container"`
+	Image         string   `yaml:"image"`
 	Build         []string `yaml:"build,omitempty"`
 	Source        string   `yaml:"source,omitempty"`
 	AptRequires   string   `yaml:"aptRequires,omitempty"`

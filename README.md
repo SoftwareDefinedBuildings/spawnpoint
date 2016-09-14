@@ -190,10 +190,10 @@ The valid parameters currently are:
   precisely the path to this file) is also set as the value of the
   `BW2_DEFAULT_ENTITY` environment variable inside the container.
 
-* `container` (optional): The complete name of a specific Docker image that is
+* `image` (optional): The complete name of a specific Docker image that is
   used to build the service's container. This image will then be pulled from
   the specified repository before service instantiation. Defaults to
-  "immesys/spawnpoint:amd64".
+  "jhkolb/spawnpoint:amd64".
 
 * `aptRequires` (optional): A sequence of names of Ubuntu packages to install as
   part of the container build process.
