@@ -19,10 +19,12 @@ type SpawnClient struct {
 }
 
 func New(router string, entityFile string) (*SpawnClient, error) {
+	bw2.SilenceLog()
 	BWC, err := bw2.Connect(router)
 	if err != nil {
 		return nil, err
 	}
+	BWC.StatLine()
 
 	_, err = BWC.SetEntityFile(entityFile)
 	if err != nil {

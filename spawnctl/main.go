@@ -12,8 +12,8 @@ import (
 	"github.com/immesys/spawnpoint/spawnclient"
 	"gopkg.in/yaml.v2"
 
-	"github.com/codegangsta/cli"
 	"github.com/mgutz/ansi"
+	"github.com/urfave/cli"
 )
 
 const timeCutoff = 2 * time.Minute
@@ -33,7 +33,6 @@ func main() {
 		cli.StringFlag{
 			Name:   "entity, e",
 			Usage:  "set the entity keyfile",
-			Value:  "entity.key",
 			EnvVar: "BW2_DEFAULT_ENTITY",
 		},
 	}
@@ -48,6 +47,18 @@ func main() {
 					Name:  "uri, u",
 					Usage: "a base URI to scan from",
 					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "example",
+			Usage:  "Generate an example configuration",
+			Action: actionExample,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "output, o",
+					Usage: "the output filename",
+					Value: "example.yml",
 				},
 			},
 		},
@@ -135,6 +146,40 @@ func fixuri(u string) string {
 	return u
 }
 
+func actionExample(c *cli.Context) error {
+	f, err := os.Create("example.yml")
+	if err != nil {
+		fmt.Printf("could not open file: %v\n", err)
+		os.Exit(1)
+	}
+	f.WriteString(`entity: /path/to/entity.ent
+container: jhkolb/spawnpoint:amd64
+source: git+http://github.com/your/repo
+build: [go get -d, go build -o svcexe]
+run: [./svcexe, "your", "params"]
+memAlloc: 512M
+cpuShares: 1024
+includedFiles: [params.yml]`)
+	err = f.Close()
+	if err != nil {
+		fmt.Printf("could not save file: %v\n", err)
+		os.Exit(1)
+	}
+	f, err = os.Create("params.yml")
+	if err != nil {
+		fmt.Printf("could not open file: %v\n", err)
+		os.Exit(1)
+	}
+	f.WriteString(`key: value
+aparam: avalue`)
+	err = f.Close()
+	if err != nil {
+		fmt.Printf("could not save file: %v\n", err)
+		os.Exit(1)
+	}
+	return nil
+}
+
 func printLastSeen(lastSeen time.Time, name string, uri string) {
 	var color string
 	if !objects.IsSpawnPointGood(lastSeen) {
@@ -142,7 +187,7 @@ func printLastSeen(lastSeen time.Time, name string, uri string) {
 	} else {
 		color = ansi.ColorCode("green+b")
 	}
-	dur := time.Now().Sub(lastSeen)
+	dur := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
 	ls := lastSeen.Format(time.RFC822) + " (" + dur.String() + ")"
 	if uri != "" {
 		fmt.Printf("[%s%s%s] seen %s%s%s ago at %s\n", ansi.ColorCode("blue+b"),
@@ -159,8 +204,11 @@ func actionScan(c *cli.Context) error {
 		fmt.Println("No Bosswave entity specified")
 		os.Exit(1)
 	}
-
-	baseuri := fixuri(c.String("uri"))
+	uriparam := c.String("uri")
+	if uriparam == "" && len(c.Args()) > 0 {
+		uriparam = c.Args()[0]
+	}
+	baseuri := fixuri(uriparam)
 	if len(baseuri) == 0 {
 		fmt.Println("Missing 'uri' parameter")
 		os.Exit(1)
@@ -186,7 +234,7 @@ func actionScan(c *cli.Context) error {
 	// Print out status information on all discovered spawnpoints
 	for _, sp := range spawnPoints {
 		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
-		fmt.Printf("    Available Memory: %v MB, Available Cpu Shares: %v\n",
+		fmt.Printf("  Available Memory: %v MB, Available Cpu Shares: %v\n",
 			sp.AvailableMem, sp.AvailableCPUShares)
 	}
 
@@ -201,17 +249,17 @@ func actionScan(c *cli.Context) error {
 
 			for _, svc := range svcs {
 				if time.Now().Sub(svc.LastSeen) < timeCutoff {
-					fmt.Print("• ")
+					fmt.Print("  • ")
 					printLastSeen(svc.LastSeen, svc.Name, "")
-					fmt.Printf("    Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
+					fmt.Printf("      Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
 				}
 			}
 
 			if len(metadata) > 0 {
-				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
+				fmt.Printf("      %sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 				for key, tuple := range metadata {
 					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < timeCutoff {
-						fmt.Printf("  • %s: %s\n", key, tuple.Value)
+						fmt.Printf("        • %s: %s\n", key, tuple.Value)
 					}
 				}
 			}
