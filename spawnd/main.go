@@ -106,6 +106,7 @@ func readMetadataFromFile(fileName string) (*map[string]string, error) {
 }
 
 func initializeBosswave() (*bw2.BW2Client, error) {
+	bw2.SilenceLog()
 	client, err := bw2.Connect(cfg.LocalRouter)
 	if err != nil {
 		return nil, err
@@ -182,10 +183,10 @@ func actionRun(c *cli.Context) error {
 	runningServices = make(map[string]*Manifest)
 	recoverPreviousState()
 
-	go heartbeat()
-	go persistManifests()
 	fmt.Printf("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
 		objects.SpawnpointVersion, ansi.ColorCode("reset"))
+	go heartbeat()
+	go persistManifests()
 
 	// Publish outgoing log messages
 	for msg := range olog {
@@ -201,8 +202,8 @@ func actionRun(c *cli.Context) error {
 		}
 
 		if err := spInterface.PublishSignal("log", po); err != nil {
-			fmt.Println("Failed to publish log message:", err)
-			os.Exit(1)
+			fmt.Printf("%s[WARN]%s Failed to publish log message: %v\n", ansi.ColorCode("yellow+b"),
+				ansi.ColorCode("reset"), err)
 		}
 	}
 
@@ -218,7 +219,11 @@ func heartbeat() {
 		shares := availableCPUShares
 		availLock.Unlock()
 
-		fmt.Printf("Memory: %v, CPU Shares: %v\n", mem, shares)
+		runningSvcsLock.Lock()
+		numServices := len(runningServices)
+		runningSvcsLock.Unlock()
+
+		fmt.Printf("Num Services: %v, Memory (MiB): %v, CPU Shares: %v\n", numServices, mem, shares)
 		msg := objects.SpawnPointHb{
 			Alias:              cfg.Alias,
 			Time:               time.Now().UnixNano(),
@@ -232,9 +237,9 @@ func heartbeat() {
 			panic(err)
 		}
 
-		err = spInterface.PublishSignal("heartbeat", hbPo)
-		if err != nil {
-			panic(err)
+		if err = spInterface.PublishSignal("heartbeat", hbPo); err != nil {
+			fmt.Printf("%s[WARN]%s Failed to publish log message: %v\n", ansi.ColorCode("yellow+b"),
+				ansi.ColorCode("reset"), err)
 		}
 		time.Sleep(heartbeatPeriod * time.Second)
 	}
@@ -292,9 +297,9 @@ func svcHeartbeat(svcname string, statCh *chan *docker.Stats) {
 			if err != nil {
 				panic(err)
 			}
-			err = spInterface.PublishSignal("heartbeat/"+svcname, hbPo)
-			if err != nil {
-				panic(err)
+			if err = spInterface.PublishSignal("heartbeat/"+svcname, hbPo); err != nil {
+				fmt.Printf("%s[WARN]%s Failed to publish heartbeat for service %s: %v",
+					ansi.ColorCode("yellow+b"), ansi.ColorCode("reset"), svcname, err)
 			}
 
 			lastEmitted = time.Now()
@@ -615,7 +620,10 @@ func persistManifests() {
 		if err != nil {
 			fmt.Println("Failed to marshal manifests for persistence")
 		} else {
-			spInterface.PublishSignal("manifests", mfstPo)
+			if err = spInterface.PublishSignal("manifests", mfstPo); err != nil {
+				fmt.Printf("%s[WARN]%s Failed to persist manifests: %v\n", ansi.ColorCode("yellow+b"),
+					ansi.ColorCode("reset"), err)
+			}
 		}
 
 		time.Sleep(persistManifestPeriod * time.Second)
