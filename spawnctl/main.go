@@ -247,20 +247,22 @@ func actionScan(c *cli.Context) error {
 				os.Exit(1)
 			}
 
+			if len(metadata) > 0 {
+				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
+				for key, tuple := range metadata {
+					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < timeCutoff {
+						fmt.Printf("  • %s: %s\n", key, tuple.Value)
+					}
+				}
+			}
+
+			fmt.Printf("%sServices:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 			for _, svc := range svcs {
 				if time.Now().Sub(svc.LastSeen) < timeCutoff {
 					fmt.Print("  • ")
 					printLastSeen(svc.LastSeen, svc.Name, "")
-					fmt.Printf("      Memory: %v MB, Cpu Shares: %v\n", svc.MemAlloc, svc.CPUShares)
-				}
-			}
-
-			if len(metadata) > 0 {
-				fmt.Printf("      %sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
-				for key, tuple := range metadata {
-					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < timeCutoff {
-						fmt.Printf("        • %s: %s\n", key, tuple.Value)
-					}
+					fmt.Printf("      Memory: %.2f/%d MB, Cpu Shares: ~%d/%d\n", svc.MemUsage, svc.MemAlloc,
+						svc.CPUShareUsage, svc.CPUShares)
 				}
 			}
 		}
@@ -272,8 +274,11 @@ func actionScan(c *cli.Context) error {
 func tailLog(log chan *objects.SPLogMsg) {
 	for logMsg := range log {
 		tstring := time.Unix(0, logMsg.Time).Format("01/02 15:04:05")
-		fmt.Printf("[%s] %s%s::%s > %s%s\n", tstring, ansi.ColorCode("blue+b"), logMsg.SPAlias,
-			logMsg.Service, ansi.ColorCode("reset"), strings.Trim(logMsg.Contents, "\n"))
+		prefix := fmt.Sprintf("[%s] %s%s::%s >%s ", tstring, ansi.ColorCode("blue+b"),
+			logMsg.SPAlias, logMsg.Service, ansi.ColorCode("reset"))
+		trimmed := strings.Trim(logMsg.Contents, "\n")
+		prefixed := prefix + strings.Replace(trimmed, "\n", "\n"+prefix, -1)
+		fmt.Println(prefixed)
 	}
 }
 
@@ -389,7 +394,7 @@ func actionDeploy(c *cli.Context) error {
 	}
 	log, err := spawnClient.DeployService(svcConfig, spURI, svcName)
 	if err != nil {
-		fmt.Printf("%s[ERROR]%s Service deployment failed, %v", ansi.ColorCode("red+b"),
+		fmt.Printf("%s[ERROR]%s Service deployment failed, %v\n", ansi.ColorCode("red+b"),
 			ansi.ColorCode("reset"), err)
 		os.Exit(1)
 	}

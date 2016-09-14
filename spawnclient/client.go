@@ -2,8 +2,10 @@ package spawnclient
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,12 +100,15 @@ func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, map[str
 					continue
 				}
 
+				usedCPUShares := uint64(math.Ceil(svcHb.CPUPercent * objects.SharesPerCore))
 				newService := objects.Service{
-					Name:      svcHb.Name,
-					HostURI:   svcHb.SpawnpointURI,
-					LastSeen:  time.Unix(0, svcHb.Time),
-					MemAlloc:  svcHb.MemAlloc,
-					CPUShares: svcHb.CPUShares,
+					Name:          svcHb.Name,
+					HostURI:       svcHb.SpawnpointURI,
+					LastSeen:      time.Unix(0, svcHb.Time),
+					MemAlloc:      svcHb.MemAlloc,
+					CPUShares:     svcHb.CPUShares,
+					MemUsage:      svcHb.MemUsage,
+					CPUShareUsage: usedCPUShares,
 				}
 				svcs = append(svcs, newService)
 			}
@@ -159,6 +164,19 @@ func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string
 	return log, nil
 }
 
+func validateConfiguration(config *objects.SvcConfig) error {
+	if config.Entity == "" {
+		return errors.New("Must specify a Bosswave entity")
+	} else if config.Run == nil {
+		return errors.New("Must specify run commands")
+	} else if config.MemAlloc == "" {
+		return errors.New("Must specify memory allocation")
+	} else if config.CPUShares == 0 {
+		return errors.New("Must specify CPU shares")
+	}
+	return nil
+}
+
 func encodeEntityFile(fileName string) (string, error) {
 	absPath, _ := filepath.Abs(fileName)
 	contents, err := ioutil.ReadFile(absPath)
@@ -208,7 +226,10 @@ func createArchiveEncoding(includedDirs []string, includedFiles []string) (strin
 }
 
 func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, name string) (chan *objects.SPLogMsg, error) {
-	var err error
+	err := validateConfiguration(config)
+	if err != nil {
+		return nil, fmt.Errorf("Invalid config file: %v", err)
+	}
 	if config.Entity, err = encodeEntityFile(config.Entity); err != nil {
 		return nil, fmt.Errorf("Failed to encode entity file: %v", err)
 	}

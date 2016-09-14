@@ -7,6 +7,7 @@ import (
 )
 
 const SpawnpointVersion = "0.1.4"
+const SharesPerCore = 1024
 
 type SpawnPointHb struct {
 	Alias              string
@@ -44,11 +45,13 @@ type SpawnPoint struct {
 }
 
 type Service struct {
-	Name      string
-	HostURI   string
-	LastSeen  time.Time
-	MemAlloc  uint64
-	CPUShares uint64
+	Name          string
+	HostURI       string
+	LastSeen      time.Time
+	MemAlloc      uint64
+	CPUShares     uint64
+	MemUsage      float64
+	CPUShareUsage uint64
 }
 
 func (sp *SpawnPoint) Good() bool {
