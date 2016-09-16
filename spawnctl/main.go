@@ -153,7 +153,7 @@ func actionExample(c *cli.Context) error {
 		os.Exit(1)
 	}
 	f.WriteString(`entity: /path/to/entity.ent
-container: jhkolb/spawnpoint:amd64
+image: jhkolb/spawnpoint:amd64
 source: git+http://github.com/your/repo
 build: [go get -d, go build -o svcexe]
 run: [./svcexe, "your", "params"]
