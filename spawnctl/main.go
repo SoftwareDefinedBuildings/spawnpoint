@@ -250,7 +250,7 @@ func actionScan(c *cli.Context) error {
 			if len(metadata) > 0 {
 				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 				for key, tuple := range metadata {
-					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < timeCutoff {
+					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < objects.ZombiePeriod {
 						fmt.Printf("  • %s: %s\n", key, tuple.Value)
 					}
 				}

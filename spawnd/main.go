@@ -219,11 +219,7 @@ func heartbeat() {
 		shares := availableCPUShares
 		availLock.Unlock()
 
-		runningSvcsLock.Lock()
-		numServices := len(runningServices)
-		runningSvcsLock.Unlock()
-
-		fmt.Printf("Num Services: %v, Memory (MiB): %v, CPU Shares: %v\n", numServices, mem, shares)
+		fmt.Printf("Memory (MiB): %v, CPU Shares: %v\n", mem, shares)
 		msg := objects.SpawnPointHb{
 			Alias:              cfg.Alias,
 			Time:               time.Now().UnixNano(),
@@ -363,6 +359,11 @@ func stopService(mfst *Manifest) {
 		// Log message will be output by docker event monitor
 		fmt.Println("Container stopped successfully")
 	}
+
+	// Skip the zombie phase -- remove manifest immediately
+	runningSvcsLock.Lock()
+	delete(runningServices, mfst.ServiceName)
+	runningSvcsLock.Unlock()
 }
 
 func handleConfig(m *bw2.SimpleMessage) {
@@ -472,7 +473,6 @@ func handleConfig(m *bw2.SimpleMessage) {
 	}
 
 	go restartService(&mf, true)
-
 }
 
 func handleRestart(msg *bw2.SimpleMessage) {
@@ -487,6 +487,23 @@ func handleRestart(msg *bw2.SimpleMessage) {
 			if mfst.AutoRestart {
 				// Stop the container and let auto restart do the work for us
 				StopContainer(mfst.ServiceName, false)
+			} else if mfst.Container == nil {
+				// If service is a zombie, we need to do admission control
+				availLock.Lock()
+				if int64(mfst.CPUShares) > availableCPUShares {
+					msg := fmt.Sprintf("Insufficient CPU shares to resurrect service (have %d, want %d)",
+						availableCPUShares, mfst.CPUShares)
+					olog <- SLM{Service: svcName, Message: msg}
+				} else if int64(mfst.MemAlloc) > availableMem {
+					msg := fmt.Sprintf("Insufficient memory to resurrect service (have %d, want %d)",
+						availableMem, mfst.MemAlloc)
+					olog <- SLM{Service: svcName, Message: msg}
+				} else {
+					availableCPUShares -= int64(mfst.CPUShares)
+					availableMem -= int64(mfst.MemAlloc)
+					go restartService(mfst, false)
+				}
+				availLock.Unlock()
 			} else {
 				go restartService(mfst, false)
 			}
@@ -565,6 +582,7 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 				// Need to shadow to avoid loop reference variable bug
 				if manifest.Container.Raw.ID == event.Actor.ID {
 					relevantManifest = manifest
+					relevantManifest.Container = nil
 				}
 			}
 			runningSvcsLock.Unlock()
@@ -579,14 +597,21 @@ func monitorDockerEvents(ec *chan *docker.APIEvents) {
 						restartService(relevantManifest, false)
 					}()
 				} else {
-					runningSvcsLock.Lock()
-					delete(runningServices, relevantManifest.ServiceName)
-					runningSvcsLock.Unlock()
 					// Still need to update memory and cpu availability
 					availLock.Lock()
 					availableCPUShares += int64(relevantManifest.CPUShares)
 					availableMem += int64(relevantManifest.MemAlloc)
 					availLock.Unlock()
+
+					// Defer removal of the manifest in case user wants to restart
+					go func() {
+						time.Sleep(objects.ZombiePeriod)
+						if relevantManifest.Container == nil {
+							runningSvcsLock.Lock()
+							delete(runningServices, relevantManifest.ServiceName)
+							runningSvcsLock.Unlock()
+						}
+					}()
 				}
 			}
 		}

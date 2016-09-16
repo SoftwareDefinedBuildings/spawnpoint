@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
-const SpawnpointVersion = "0.2.0"
+const SpawnpointVersion = "0.2.1"
 const SharesPerCore = 1024
+
+const ZombiePeriod = 30 * time.Second
 
 type SpawnPointHb struct {
 	Alias              string
