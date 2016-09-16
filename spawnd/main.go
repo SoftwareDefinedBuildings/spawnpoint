@@ -314,6 +314,12 @@ func restartService(mfst *Manifest, initialBoot bool) {
 		olog <- SLM{mfst.ServiceName, "attempting restart"}
 	}
 
+	// If we need to restart the old container, we need to stop the Docker event
+	// monitor goroutine from interfering (e.g. auto restarting)
+	runningSvcsLock.Lock()
+	delete(runningServices, mfst.ServiceName)
+	runningSvcsLock.Unlock()
+
 	if mfst.logger == nil {
 		logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
 		mfst.logger = logger
@@ -329,21 +335,15 @@ func restartService(mfst *Manifest, initialBoot bool) {
 		availableMem += int64(mfst.MemAlloc)
 		availableCPUShares += int64(mfst.CPUShares)
 		availLock.Unlock()
-
-		runningSvcsLock.Lock()
-		delete(runningServices, mfst.ServiceName)
-		runningSvcsLock.Unlock()
 	} else {
 		msg := "Container (re)start successful"
 		olog <- SLM{mfst.ServiceName, msg}
 		fmt.Println(mfst.ServiceName, "::", msg)
 		mfst.Container = cnt
 
-		if initialBoot {
-			runningSvcsLock.Lock()
-			runningServices[mfst.ServiceName] = mfst
-			runningSvcsLock.Unlock()
-		}
+		runningSvcsLock.Lock()
+		runningServices[mfst.ServiceName] = mfst
+		runningSvcsLock.Unlock()
 		go svcHeartbeat(mfst.ServiceName, cnt.StatChan)
 	}
 }
