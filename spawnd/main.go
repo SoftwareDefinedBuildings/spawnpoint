@@ -166,7 +166,7 @@ func actionRun(c *cli.Context) error {
 				for mdKey, mdVal := range *metadata {
 					spService.SetMetadata(mdKey, mdVal)
 				}
-				time.Sleep(1 * time.Minute)
+				time.Sleep(heartbeatPeriod * time.Second)
 			}
 		}()
 	}

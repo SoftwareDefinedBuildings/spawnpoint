@@ -16,8 +16,6 @@ import (
 	"github.com/urfave/cli"
 )
 
-const timeCutoff = 2 * time.Minute
-
 func main() {
 	app := cli.NewApp()
 	app.Name = "spawnctl"
@@ -247,10 +245,10 @@ func actionScan(c *cli.Context) error {
 				os.Exit(1)
 			}
 
+			fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 			if len(metadata) > 0 {
-				fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 				for key, tuple := range metadata {
-					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < objects.ZombiePeriod {
+					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < objects.MetadataExpiry {
 						fmt.Printf("  • %s: %s\n", key, tuple.Value)
 					}
 				}
@@ -258,7 +256,7 @@ func actionScan(c *cli.Context) error {
 
 			fmt.Printf("%sServices:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 			for _, svc := range svcs {
-				if time.Now().Sub(svc.LastSeen) < timeCutoff {
+				if time.Now().Sub(svc.LastSeen) < objects.ZombiePeriod {
 					fmt.Print("  • ")
 					printLastSeen(svc.LastSeen, svc.Name, "")
 					fmt.Printf("      Memory: %.2f/%d MB, CPU Shares: ~%d/%d\n", svc.MemUsage, svc.MemAlloc,
