@@ -284,8 +284,14 @@ Monitoring log URI scratch.ns/spawnpoint/gamma/s.spawnpoint/demosvc/i.spawnable/
 To stop rather than restart `demosvc` on Spawnpoint alpha, simply replace
 `restart` with `stop` above.
 
-Note that, just like with service deployment, log messages from the Spawnpoint
+Note that, just as with a service deployment, log messages from the Spawnpoint
 are emitted to the screen until the user presses `<CTRL>-C`.
+
+When a Spawnpoint service terminates and does not have `autoRestart` enabled, it
+enters a brief "zombie" period. During this time, the service will still appear
+in `spawnctl` scan results, and you may restart the service like normal. Once
+this period expires, the service is deleted, and you must do a manual deploy
+operation to reinstantiate the service.
 
 ## Writing a Spawnpoint Service
 The [demosvc](https://github.com/jkolb1/demosvc) provides a good example of a
