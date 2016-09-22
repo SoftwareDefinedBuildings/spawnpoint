@@ -123,7 +123,9 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	netMode := "bridge"
 	if cfg.OverlayNet != "" {
 		netMode = cfg.OverlayNet
-		createNetIfNecessary(cfg.OverlayNet)
+		if err = createNetIfNecessary(cfg.OverlayNet); err != nil {
+			return nil, fmt.Errorf("Failed to create overlay net: %v", err)
+		}
 	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
