@@ -248,7 +248,7 @@ func actionScan(c *cli.Context) error {
 			fmt.Printf("%sMetadata:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 			if len(metadata) > 0 {
 				for key, tuple := range metadata {
-					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < objects.MetadataExpiry {
+					if time.Now().Sub(time.Unix(0, tuple.Timestamp)) < objects.MetadataCutoff {
 						fmt.Printf("  • %s: %s\n", key, tuple.Value)
 					}
 				}

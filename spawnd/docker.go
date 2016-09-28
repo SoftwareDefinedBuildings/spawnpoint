@@ -69,7 +69,7 @@ func StopContainer(serviceName string, removeContainer bool) error {
 
 	for name, containerInfo := range curContainers {
 		if name == serviceName {
-			fmt.Println("Found existing container for service, deleting")
+			fmt.Println("Found existing container for service, stopping")
 			if containerInfo.Raw.State.Running {
 				err := dkr.StopContainer(containerInfo.Raw.ID, timeoutLen)
 				if err != nil {
@@ -161,7 +161,6 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 
 	attachLogger(cnt, cfg.logger)
 	statChan := collectStats(cnt)
-
 	return &SpawnPointContainer{cnt, cfg.ServiceName, statChan}, nil
 }
 

@@ -16,4 +16,5 @@ type Manifest struct {
 	Volumes     []string
 	logger      *BWLogger
 	OverlayNet  string
+	eventChan   *chan svcEvent
 }
