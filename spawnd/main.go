@@ -321,7 +321,7 @@ func handleConfig(m *bw2.SimpleMessage) {
 			} else {
 				tag = "meta"
 			}
-			olog <- SLM{Service: tag, Message: fmt.Sprintf("Failed to launch service: %+v", r)}
+			olog <- SLM{Service: tag, Message: fmt.Sprintf("[FAILURE] Unable to launch service: %+v", r)}
 		}
 	}()
 
@@ -398,7 +398,7 @@ func handleRestart(msg *bw2.SimpleMessage) {
 		if ok {
 			*mfst.eventChan <- restart
 		} else {
-			olog <- SLM{Service: svcName, Message: "Service not found"}
+			olog <- SLM{Service: svcName, Message: "[FAILURE] Service not found"}
 		}
 	}
 }
@@ -414,7 +414,7 @@ func handleStop(msg *bw2.SimpleMessage) {
 		if ok {
 			*mfst.eventChan <- stop
 		} else {
-			olog <- SLM{Service: svcName, Message: "Service not found"}
+			olog <- SLM{Service: svcName, Message: "[FAILURE] Service not found"}
 		}
 	}
 }
@@ -430,7 +430,7 @@ func manageService(mfst *Manifest) {
 			previousMem := int64(0)
 			previousCPU := int64(0)
 			if ok && existingManifest.Container != nil {
-				olog <- SLM{mfst.ServiceName, "Found instance of service already running"}
+				olog <- SLM{mfst.ServiceName, "[INFO] Found instance of service already running"}
 				previousMem = int64(existingManifest.MemAlloc)
 				previousCPU = int64(existingManifest.CPUShares)
 			}
@@ -438,13 +438,13 @@ func manageService(mfst *Manifest) {
 			// Check if Spawnpoint has sufficient resources. If not, reject configuration
 			availLock.Lock()
 			if int64(mfst.MemAlloc) > (availableMem + int64(previousMem)) {
-				msg := fmt.Sprintf("Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
+				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
 					availableMem+previousMem, mfst.MemAlloc)
 				olog <- SLM{mfst.ServiceName, msg}
 				availLock.Unlock()
 				return
 			} else if int64(mfst.CPUShares) > (availableCPUShares + int64(previousCPU)) {
-				msg := fmt.Sprintf("Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
+				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
 					availableCPUShares+previousCPU, mfst.CPUShares)
 				olog <- SLM{mfst.ServiceName, msg}
 				availLock.Unlock()
@@ -460,7 +460,7 @@ func manageService(mfst *Manifest) {
 				existingManifest.AutoRestart = false
 				err := StopContainer(existingManifest.ServiceName, true)
 				if err != nil {
-					olog <- SLM{mfst.ServiceName, "Failed to remove existing service"}
+					olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to remove existing service"}
 					existingManifest.AutoRestart = true
 				} else {
 					runningSvcsLock.Lock()
@@ -470,10 +470,10 @@ func manageService(mfst *Manifest) {
 			}
 
 			// Now start the container
-			olog <- SLM{mfst.ServiceName, "Booting service"}
+			olog <- SLM{mfst.ServiceName, "[INFO] Booting service"}
 			container, err := RestartContainer(mfst, cfg.ContainerRouter, true)
 			if err != nil {
-				msg := fmt.Sprintf("Container (re)start failed: %v", err)
+				msg := fmt.Sprintf("[FAILURE] Unable to (re)start container: %v", err)
 				olog <- SLM{mfst.ServiceName, msg}
 				availLock.Lock()
 				availableMem += int64(mfst.MemAlloc)
@@ -482,7 +482,7 @@ func manageService(mfst *Manifest) {
 				return
 			}
 			mfst.Container = container
-			msg := "Container (re)start successful"
+			msg := "[SUCCESS] Container (re)start successful"
 			olog <- SLM{mfst.ServiceName, msg}
 			runningSvcsLock.Lock()
 			runningServices[mfst.ServiceName] = mfst
@@ -490,15 +490,15 @@ func manageService(mfst *Manifest) {
 			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 
 		case restart:
-			olog <- SLM{mfst.ServiceName, "Attempting restart"}
+			olog <- SLM{mfst.ServiceName, "[INFO] Attempting restart"}
 			if mfst.Container != nil {
 				// Service is already running
 				err := StopContainer(mfst.ServiceName, false)
 				if err != nil {
-					olog <- SLM{mfst.ServiceName, "Failed to stop existing service"}
+					olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to stop existing service"}
 					continue
 				}
-				olog <- SLM{mfst.ServiceName, "Stopped existing service"}
+				olog <- SLM{mfst.ServiceName, "[INFO] Stopped existing service"}
 				// Need to eat die event from docker event monitor
 				event = <-*mfst.eventChan
 				if event != die {
@@ -509,7 +509,7 @@ func manageService(mfst *Manifest) {
 
 			container, err := RestartContainer(mfst, cfg.ContainerRouter, false)
 			if err != nil {
-				msg := fmt.Sprintf("Container restart failed: %v", err)
+				msg := fmt.Sprintf("[FAILURE] Unable to restart container: %v", err)
 				olog <- SLM{mfst.ServiceName, msg}
 				if mfst.Container != nil {
 					runningSvcsLock.Lock()
@@ -529,25 +529,25 @@ func manageService(mfst *Manifest) {
 					availLock.Unlock()
 				}
 				mfst.Container = container
-				olog <- SLM{mfst.ServiceName, "Container restart successful"}
+				olog <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
 				go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 			}
 
 		case stop:
-			olog <- SLM{mfst.ServiceName, "Attempting to stop container"}
+			olog <- SLM{mfst.ServiceName, "[INFO] Attempting to stop container"}
 			// Updating available mem and cpu shares done by event monitor
 			mfst.AutoRestart = false
 			err := StopContainer(mfst.ServiceName, true)
 			if err != nil {
-				msg := fmt.Sprintf("Failed to stop container: %v", err)
+				msg := fmt.Sprintf("[FAILURE] Unable to stop container: %v", err)
 				olog <- SLM{mfst.ServiceName, msg}
 				mfst.AutoRestart = true
 			} else {
-				olog <- SLM{mfst.ServiceName, "Container stopped successfully"}
+				olog <- SLM{mfst.ServiceName, "[SUCCESS] Container stopped"}
 			}
 
 		case die:
-			olog <- SLM{mfst.ServiceName, "Container stopped"}
+			olog <- SLM{mfst.ServiceName, "[INFO] Container has stopped"}
 			if mfst.AutoRestart {
 				go func() {
 					if mfst.RestartInt > 0 {
@@ -574,7 +574,7 @@ func manageService(mfst *Manifest) {
 			}
 
 		case adopt:
-			olog <- SLM{mfst.ServiceName, "Reassuming ownership upon spawnd restart"}
+			olog <- SLM{mfst.ServiceName, "[INFO] Reassuming ownership upon spawnd restart"}
 			availLock.Lock()
 			availableMem -= int64(mfst.MemAlloc)
 			availableCPUShares -= int64(mfst.CPUShares)

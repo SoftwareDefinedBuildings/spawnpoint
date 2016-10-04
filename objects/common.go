@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const SpawnpointVersion = "0.3.0"
+const SpawnpointVersion = "0.3.1"
 const SharesPerCore = 1024
 
 const ZombiePeriod = 2 * time.Minute
