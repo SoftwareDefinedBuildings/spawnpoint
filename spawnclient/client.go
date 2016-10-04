@@ -26,9 +26,7 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	_, err = BWC.SetEntityFile(entityFile)
-	if err != nil {
+	if _, err := BWC.SetEntityFile(entityFile); err != nil {
 		return nil, err
 	}
 
@@ -170,8 +168,6 @@ func (sc *SpawnClient) manipulateService(baseURI string, name string, cmd string
 func validateConfiguration(config *objects.SvcConfig) error {
 	if config.Entity == "" {
 		return errors.New("Must specify a Bosswave entity")
-	} else if config.Run == nil {
-		return errors.New("Must specify run commands")
 	} else if config.MemAlloc == "" {
 		return errors.New("Must specify memory allocation")
 	} else if config.CPUShares == 0 {

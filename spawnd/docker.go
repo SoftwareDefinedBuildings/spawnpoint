@@ -107,7 +107,6 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	if rebuildImg {
 		err = rebuildImage(cfg, imgname)
 		if err != nil {
-			fmt.Printf("Failed to build image for svc %s: %v\n", cfg.ServiceName, err)
 			return nil, err
 		}
 	}
