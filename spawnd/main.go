@@ -564,12 +564,13 @@ func manageService(mfst *Manifest) {
 
 				// Defer removal of the manifest in case user wants to restart
 				time.AfterFunc(objects.ZombiePeriod, func() {
-					if mfst.Container == nil {
-						runningSvcsLock.Lock()
+					runningSvcsLock.Lock()
+					latestMfst, ok := runningServices[mfst.ServiceName]
+					if ok && latestMfst.Container == nil {
 						delete(runningServices, mfst.ServiceName)
-						runningSvcsLock.Unlock()
 						close(*mfst.eventChan)
 					}
+					runningSvcsLock.Unlock()
 				})
 			}
 
