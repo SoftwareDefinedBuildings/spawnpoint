@@ -535,15 +535,19 @@ func manageService(mfst *Manifest) {
 
 		case stop:
 			olog <- SLM{mfst.ServiceName, "[INFO] Attempting to stop container"}
-			// Updating available mem and cpu shares done by event monitor
-			mfst.AutoRestart = false
-			err := StopContainer(mfst.ServiceName, true)
-			if err != nil {
-				msg := fmt.Sprintf("[FAILURE] Unable to stop container: %v", err)
-				olog <- SLM{mfst.ServiceName, msg}
-				mfst.AutoRestart = true
+			if mfst.Container == nil {
+				olog <- SLM{mfst.ServiceName, "[INFO] Container is already stopped"}
 			} else {
-				olog <- SLM{mfst.ServiceName, "[SUCCESS] Container stopped"}
+				// Updating available mem and cpu shares done by event monitor
+				mfst.AutoRestart = false
+				err := StopContainer(mfst.ServiceName, true)
+				if err != nil {
+					msg := fmt.Sprintf("[FAILURE] Unable to stop container: %v", err)
+					olog <- SLM{mfst.ServiceName, msg}
+					mfst.AutoRestart = true
+				} else {
+					olog <- SLM{mfst.ServiceName, "[SUCCESS] Container stopped"}
+				}
 			}
 
 		case die:
