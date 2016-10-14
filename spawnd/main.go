@@ -47,12 +47,15 @@ type SLM struct {
 }
 
 type svcEvent int
+
 const (
-	boot    svcEvent = iota
-	restart svcEvent = iota
-	stop    svcEvent = iota
-	die     svcEvent = iota
-	adopt   svcEvent = iota
+	boot        svcEvent = iota
+	restart     svcEvent = iota
+	stop        svcEvent = iota
+	die         svcEvent = iota
+	adopt       svcEvent = iota
+	resurrect   svcEvent = iota
+	autoRestart svcEvent = iota
 )
 
 func main() {
@@ -395,8 +398,12 @@ func handleRestart(msg *bw2.SimpleMessage) {
 		mfst, ok := runningServices[svcName]
 		runningSvcsLock.Unlock()
 
-		if ok {
+		if ok && mfst.Container != nil {
+			// Restart a running service
 			*mfst.eventChan <- restart
+		} else if ok {
+			// Restart a zombie service
+			*mfst.eventChan <- resurrect
 		} else {
 			olog <- SLM{Service: svcName, Message: "[FAILURE] Service not found"}
 		}
@@ -457,11 +464,10 @@ func manageService(mfst *Manifest) {
 
 			// Remove previous version if necessary
 			if ok && existingManifest.Container != nil {
-				existingManifest.AutoRestart = false
+				mfst.restarting = true
 				err := StopContainer(existingManifest.ServiceName, true)
 				if err != nil {
 					olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to remove existing service"}
-					existingManifest.AutoRestart = true
 				} else {
 					runningSvcsLock.Lock()
 					delete(runningServices, existingManifest.ServiceName)
@@ -490,48 +496,96 @@ func manageService(mfst *Manifest) {
 			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 
 		case restart:
+			// Restart a currently running service
 			olog <- SLM{mfst.ServiceName, "[INFO] Attempting restart"}
-			if mfst.Container != nil {
-				// Service is already running
-				err := StopContainer(mfst.ServiceName, false)
-				if err != nil {
-					olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to stop existing service"}
-					continue
-				}
-				olog <- SLM{mfst.ServiceName, "[INFO] Stopped existing service"}
-				// Need to eat die event from docker event monitor
-				event = <-*mfst.eventChan
-				if event != die {
-					err = fmt.Errorf("%s: Expected 'die' event but received of different type", mfst.ServiceName)
-					panic(err)
-				}
+			mfst.restarting = true
+			err := StopContainer(mfst.ServiceName, false)
+			if err != nil {
+				mfst.restarting = false
+				olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to stop existing service"}
+				continue
 			}
+			olog <- SLM{mfst.ServiceName, "[INFO] Stopped existing service"}
 
 			container, err := RestartContainer(mfst, cfg.ContainerRouter, false)
 			if err != nil {
 				msg := fmt.Sprintf("[FAILURE] Unable to restart container: %v", err)
 				olog <- SLM{mfst.ServiceName, msg}
-				if mfst.Container != nil {
-					runningSvcsLock.Lock()
-					delete(runningServices, mfst.ServiceName)
-					runningSvcsLock.Unlock()
+				runningSvcsLock.Lock()
+				delete(runningServices, mfst.ServiceName)
+				runningSvcsLock.Unlock()
 
-					availLock.Lock()
-					availableMem += int64(mfst.MemAlloc)
-					availableCPUShares += int64(mfst.CPUShares)
-					availLock.Unlock()
-				}
-			} else {
-				if mfst.Container == nil {
-					availLock.Lock()
-					availableMem -= int64(mfst.MemAlloc)
-					availableCPUShares -= int64(mfst.CPUShares)
-					availLock.Unlock()
-				}
-				mfst.Container = container
-				olog <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
-				go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
+				availLock.Lock()
+				availableMem += int64(mfst.MemAlloc)
+				availableCPUShares += int64(mfst.CPUShares)
+				availLock.Unlock()
+				return
 			}
+			mfst.Container = container
+			olog <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
+			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
+
+		case autoRestart:
+			// Auto-restart a service that has just terminated
+			olog <- SLM{mfst.ServiceName, "[INFO] Attempting auto-restart"}
+			container, err := RestartContainer(mfst, cfg.ContainerRouter, false)
+			if err != nil {
+				msg := fmt.Sprintf("[FAILURE] Unable to auto-restart container: %v", err)
+				olog <- SLM{mfst.ServiceName, msg}
+				runningSvcsLock.Lock()
+				delete(runningServices, mfst.ServiceName)
+				runningSvcsLock.Unlock()
+
+				availLock.Lock()
+				availableMem += int64(mfst.MemAlloc)
+				availableCPUShares += int64(mfst.CPUShares)
+				availLock.Unlock()
+				return
+			}
+			mfst.Container = container
+			olog <- SLM{mfst.ServiceName, "[SUCCESS] Container auto-restart successful"}
+			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
+
+		case resurrect:
+			// Try to start up a recently terminated service
+			// Start by checking if we have sufficient resources
+			availLock.Lock()
+			if int64(mfst.MemAlloc) > availableMem {
+				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
+					availableMem, mfst.MemAlloc)
+				olog <- SLM{mfst.ServiceName, msg}
+				availLock.Unlock()
+				// We can just let the deferred manifest removal take effect
+				return
+			} else if int64(mfst.CPUShares) > availableCPUShares {
+				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
+					availableCPUShares, mfst.CPUShares)
+				olog <- SLM{mfst.ServiceName, msg}
+				availLock.Unlock()
+				// We can just let the deferred manifest removal take effect
+				return
+			} else {
+				availableMem -= int64(mfst.MemAlloc)
+				availableCPUShares -= int64(mfst.CPUShares)
+				availLock.Unlock()
+			}
+
+			// Now restart the container
+			olog <- SLM{mfst.ServiceName, "[INFO] Attempting to restart container"}
+			container, err := RestartContainer(mfst, cfg.ContainerRouter, false)
+			if err != nil {
+				msg := fmt.Sprintf("[FAILURE] Unable to (re)start container: %v", err)
+				olog <- SLM{mfst.ServiceName, msg}
+				availLock.Lock()
+				availableMem += int64(mfst.MemAlloc)
+				availableCPUShares += int64(mfst.CPUShares)
+				availLock.Unlock()
+				return
+			}
+			mfst.Container = container
+			msg := "[SUCCESS] Container (re)start successful"
+			olog <- SLM{mfst.ServiceName, msg}
+			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 
 		case stop:
 			olog <- SLM{mfst.ServiceName, "[INFO] Attempting to stop container"}
@@ -539,27 +593,33 @@ func manageService(mfst *Manifest) {
 				olog <- SLM{mfst.ServiceName, "[INFO] Container is already stopped"}
 			} else {
 				// Updating available mem and cpu shares done by event monitor
-				mfst.AutoRestart = false
 				err := StopContainer(mfst.ServiceName, true)
 				if err != nil {
 					msg := fmt.Sprintf("[FAILURE] Unable to stop container: %v", err)
 					olog <- SLM{mfst.ServiceName, msg}
-					mfst.AutoRestart = true
 				} else {
+					mfst.stopping = true
 					olog <- SLM{mfst.ServiceName, "[SUCCESS] Container stopped"}
 				}
 			}
 
 		case die:
+			if mfst.restarting {
+				mfst.restarting = false
+				continue
+			}
 			olog <- SLM{mfst.ServiceName, "[INFO] Container has stopped"}
-			if mfst.AutoRestart {
+			if mfst.AutoRestart && !mfst.stopping {
 				go func() {
 					if mfst.RestartInt > 0 {
 						time.Sleep(mfst.RestartInt)
 					}
-					*mfst.eventChan <- restart
+					*mfst.eventChan <- autoRestart
 				}()
 			} else {
+				if mfst.stopping {
+					mfst.stopping = false
+				}
 				mfst.Container = nil
 				availLock.Lock()
 				availableCPUShares += int64(mfst.CPUShares)
@@ -717,22 +777,15 @@ func recoverPreviousState() {
 	for _, mfst := range priorManifests {
 		newEvChan := make(chan svcEvent, 5)
 		mfst.eventChan = &newEvChan
+		logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
+		mfst.logger = logger
 		containerInfo, ok := knownContainers[mfst.ServiceName]
-		if ok {
-			if containerInfo.Raw.State.Running || mfst.AutoRestart {
-				newManifests[mfst.ServiceName] = &mfst
-				go manageService(&mfst)
-				if containerInfo.Raw.State.Running {
-					// Container continued running after spawnd terminated, reclaim ownership
-					logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
-					mfst.logger = logger
-					mfst.Container = ReclaimContainer(&mfst, containerInfo.Raw)
-					newEvChan <- adopt
-				} else {
-					// Container has stopped, so try to restart it
-					newEvChan <- restart
-				}
-			}
+		if ok && containerInfo.Raw.State.Running {
+			go manageService(&mfst)
+			mfst.Container = ReclaimContainer(&mfst, containerInfo.Raw)
+		} else if mfst.AutoRestart {
+			go manageService(&mfst)
+			newEvChan <- boot
 		}
 	}
 	runningSvcsLock.Lock()

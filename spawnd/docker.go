@@ -69,16 +69,13 @@ func StopContainer(serviceName string, removeContainer bool) error {
 
 	for name, containerInfo := range curContainers {
 		if name == serviceName {
-			fmt.Println("Found existing container for service, stopping")
 			if containerInfo.Raw.State.Running {
 				err := dkr.StopContainer(containerInfo.Raw.ID, timeoutLen)
 				if err != nil {
 					return err
 				}
 			}
-
 			if removeContainer {
-				fmt.Println("Removing existing container for svc", serviceName)
 				err := dkr.RemoveContainer(docker.RemoveContainerOptions{
 					ID:    containerInfo.Raw.ID,
 					Force: false,
@@ -95,10 +92,8 @@ func StopContainer(serviceName string, removeContainer bool) error {
 
 func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPointContainer, error) {
 	// First remove previous container
-	fmt.Println("Restarting container for svc", cfg.ServiceName)
 	err := StopContainer(cfg.ServiceName, true)
 	if err != nil {
-		fmt.Println("Failed to stop container for svc", cfg.ServiceName)
 		return nil, err
 	}
 

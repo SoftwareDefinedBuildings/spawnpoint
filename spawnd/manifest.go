@@ -17,4 +17,6 @@ type Manifest struct {
 	logger      *BWLogger
 	OverlayNet  string
 	eventChan   *chan svcEvent
+	restarting  bool
+	stopping    bool
 }
