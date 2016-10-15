@@ -464,14 +464,12 @@ func manageService(mfst *Manifest) {
 
 			// Remove previous version if necessary
 			if ok && existingManifest.Container != nil {
-				mfst.restarting = true
+				existingManifest.stopping = true
 				err := StopContainer(existingManifest.ServiceName, true)
 				if err != nil {
 					olog <- SLM{mfst.ServiceName, "[FAILURE] Unable to remove existing service"}
-				} else {
-					runningSvcsLock.Lock()
-					delete(runningServices, existingManifest.ServiceName)
-					runningSvcsLock.Unlock()
+					existingManifest.stopping = false
+					return
 				}
 			}
 
@@ -644,6 +642,7 @@ func manageService(mfst *Manifest) {
 			availableMem -= int64(mfst.MemAlloc)
 			availableCPUShares -= int64(mfst.CPUShares)
 			availLock.Unlock()
+			go svcHeartbeat(mfst.ServiceName, mfst.Container.StatChan)
 		}
 	}
 }
@@ -730,6 +729,7 @@ func persistManifests() {
 				RestartInt:  mfstPtr.RestartInt,
 				Volumes:     mfstPtr.Volumes,
 			}
+			i++
 		}
 		runningSvcsLock.Unlock()
 
@@ -773,22 +773,27 @@ func recoverPreviousState() {
 		return
 	}
 
-	newManifests := make(map[string]*Manifest)
+	reclaimedManifests := make(map[string]*Manifest)
 	for _, mfst := range priorManifests {
+		thisMfst := mfst
 		newEvChan := make(chan svcEvent, 5)
-		mfst.eventChan = &newEvChan
-		logger := NewLogger(bwClient, cfg.Path, cfg.Alias, mfst.ServiceName)
-		mfst.logger = logger
-		containerInfo, ok := knownContainers[mfst.ServiceName]
+		thisMfst.eventChan = &newEvChan
+		logger := NewLogger(bwClient, cfg.Path, cfg.Alias, thisMfst.ServiceName)
+		thisMfst.logger = logger
+		containerInfo, ok := knownContainers[thisMfst.ServiceName]
 		if ok && containerInfo.Raw.State.Running {
-			go manageService(&mfst)
-			mfst.Container = ReclaimContainer(&mfst, containerInfo.Raw)
+			thisMfst.Container = ReclaimContainer(&thisMfst, containerInfo.Raw)
+			go manageService(&thisMfst)
+			reclaimedManifests[thisMfst.ServiceName] = &thisMfst
+			newEvChan <- adopt
 		} else if mfst.AutoRestart {
-			go manageService(&mfst)
+			go manageService(&thisMfst)
 			newEvChan <- boot
 		}
 	}
 	runningSvcsLock.Lock()
-	runningServices = newManifests
+	for name, mfst := range reclaimedManifests {
+		runningServices[name] = mfst
+	}
 	runningSvcsLock.Unlock()
 }
