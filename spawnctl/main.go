@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"text/template"
@@ -10,11 +13,18 @@ import (
 
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/spawnclient"
+	"gopkg.in/vmihailenco/msgpack.v2"
 	"gopkg.in/yaml.v2"
 
 	"github.com/mgutz/ansi"
 	"github.com/urfave/cli"
 )
+
+type prevDeployment struct {
+	URI        string
+	ConfigFile string
+	Name       string
+}
 
 func main() {
 	app := cli.NewApp()
@@ -79,6 +89,21 @@ func main() {
 					Name:  "name, n",
 					Usage: "name of the deployed service",
 					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "deploy-last",
+			Usage:  "Run the last deploy command executed in the current directory",
+			Action: actionDeployLast,
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "yes,y",
+					Usage: "skip deployment confirmation",
+				},
+				cli.StringFlag{
+					Name:   "file, f",
+					EnvVar: "SPAWNPOINT_HISTORY_FILE",
 				},
 			},
 		},
@@ -378,6 +403,11 @@ func actionDeploy(c *cli.Context) error {
 		os.Exit(1)
 	}
 
+	deploymentRecord := prevDeployment{spURI, cfgFile, svcName}
+	if err := saveDeployment(deploymentRecord); err != nil {
+		fmt.Println("Warning: Unable to save to spawnpoint history file:", err)
+	}
+
 	svcConfig, err := parseConfig(cfgFile)
 	if err != nil {
 		fmt.Println("Invalid service configuration file:", err)
@@ -401,4 +431,91 @@ func actionDeploy(c *cli.Context) error {
 		ansi.ColorCode("green+b"), ansi.ColorCode("reset"))
 	tailLog(log)
 	return nil
+}
+
+func saveDeployment(dep prevDeployment) error {
+	historyFile := os.Getenv("SPAWNPOINT_HISTORY_FILE")
+	if historyFile == "" {
+		historyFile = os.Getenv("HOME") + "/.spawnpoint_history"
+	}
+	prevDeps := make(map[string]prevDeployment)
+	rawBytes, err := ioutil.ReadFile(historyFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		err = msgpack.Unmarshal(rawBytes, &prevDeps)
+		if err != nil {
+			return err
+		}
+	}
+
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	prevDeps[currentDir] = dep
+	rawBytes, err = msgpack.Marshal(prevDeps)
+	err = ioutil.WriteFile(historyFile, rawBytes, 0600)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func actionDeployLast(c *cli.Context) {
+	sourceFile := c.String("file")
+	if sourceFile == "" {
+		sourceFile = os.Getenv("HOME") + "/.spawnpoint_history"
+	}
+
+	previousDeps := make(map[string]prevDeployment)
+	rawBytes, err := ioutil.ReadFile(sourceFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No previous deployment for this directory")
+		} else {
+			fmt.Printf("Failed to read history file: %v\n", err)
+		}
+		os.Exit(1)
+	}
+	if err = msgpack.Unmarshal(rawBytes, &previousDeps); err != nil {
+		fmt.Println("Error: history file corrupted")
+		os.Exit(1)
+	}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Failed to get current working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	prevDep, ok := previousDeps[currentDir]
+	if !ok {
+		fmt.Println("No previous deployment for this directory")
+		os.Exit(1)
+	}
+
+	proceed := c.Bool("yes")
+	if !proceed {
+		fmt.Println("This will run:")
+		fmt.Printf("\t%sspawnctl deploy -u %s -c %s -n %s%s\n", ansi.ColorCode("green"),
+			prevDep.URI, prevDep.ConfigFile, prevDep.Name, ansi.ColorCode("reset"))
+		fmt.Println("Proceed? [Y/n]")
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		proceed = (input == "y\n" || input == "Y\n" || input == "\n")
+	}
+
+	if proceed {
+		flags := flag.NewFlagSet("spawnctl", 0)
+		flags.String("uri", "", "")
+		flags.String("config", "", "")
+		flags.String("name", "", "")
+		ctxt := cli.NewContext(c.App, flags, c)
+		ctxt.Set("uri", prevDep.URI)
+		ctxt.Set("config", prevDep.ConfigFile)
+		ctxt.Set("name", prevDep.Name)
+		actionDeploy(ctxt)
+	}
 }

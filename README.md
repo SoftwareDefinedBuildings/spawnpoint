@@ -268,6 +268,32 @@ fields. However, support for parsing a YAML file containing a sequence of
 key/value attribute pairs is still supported by the `spawnable` library through
 the `GetParams` function and its relatives.
 
+#### Conveniently Rerunning a Deployment
+You can use the `deploy-last` command to rerun the same `deploy` command that
+was last executed in the current directory. For example, if you run this command
+immediately after running the `deploy`  command given above:
+```
+$ spawnctl deploy-last
+This will run
+    spawnctl deploy -u jkolb/spawnpoint/alpha -c example.yml -n demosvc
+Proceed? [Y/n]
+```
+To confirm execution of the command, type in `Y` or `y` and hit `<ENTER>`.
+The deployment will also proceed by default if nothing is typed before
+`<ENTER>`. To skip this confirmation phase, pass a `-y` flag to `deploy-last`.
+
+Spawnpoint stores previous `deploy` commands in a history file, specified by the
+`SPAWNPOINT_HISTORY_FILE` environment variable. If this variable is not set, a
+file named `.spawnpoint_history` is saved in the user's home directory.
+
+At any time, you can force Spawnpoint to examine a particular history file for
+old `deploy` commands with the `-f` flag. For example:
+```
+$ spawnctl deploy-last -f history_file
+```
+This instructs Spawnpoint to use previous `deploy` commands saved in
+`history_file`.
+
 ### Restarting/Stopping a Service
 To restart or stop a service, you must know the base URI of the Spawnpoint on
 which it is running as well as its human readable name. To restart the service
