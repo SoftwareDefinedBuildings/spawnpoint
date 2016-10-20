@@ -340,6 +340,20 @@ func issueServiceCommand(c *cli.Context, command string) error {
 		os.Exit(1)
 	}
 
+	spawnpoints, err := spawnClient.Scan(uri)
+	if err != nil {
+		fmt.Println("Failed to scan for spawnpoint:", err)
+	}
+	spAlias := uri[strings.LastIndex(uri, "/")+1:]
+	sp, ok := spawnpoints[spAlias]
+	if !ok {
+		fmt.Printf("Error: spawnpoint at %s does not exist\n", uri)
+		os.Exit(1)
+	} else if !sp.Good() {
+		fmt.Printf("Error: spawnpoint at %s appears down\n", uri)
+		os.Exit(1)
+	}
+
 	var log chan *objects.SPLogMsg
 	switch command {
 	case "restart":
