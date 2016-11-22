@@ -1,19 +1,18 @@
 [Unit]
 Description=spawnd
+StartLimitBurst=3
+StartLimitInterval=10m
 After=bw2.service
 
 [Service]
 Restart=always
 RestartSec=1m
-ExecStartPre=/usr/bin/docker pull jhkolb/spawnd:amd64
-TimeoutStartSec=10m
-
-ExecStart=/bin/bash -c 'docker run \
+TimeoutStartSec=1m
+ExecStart=/usr/bin/docker run \
     --name %p \
     -v /etc/spawnd/:/etc/spawnd/ \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    jhkolb/spawnd:amd64'
-
+    jhkolb/spawnd:amd64
 ExecStop=/usr/bin/docker stop -t 10 %p ; /usr/bin/docker rm -f %p
 
 [Install]
