@@ -20,6 +20,8 @@ import (
 	"github.com/urfave/cli"
 )
 
+const versionNum = `0.3.4`
+
 type prevDeployment struct {
 	URI        string
 	ConfigFile string
@@ -30,7 +32,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "spawnctl"
 	app.Usage = "Control and Monitor Spawnpoints"
-	app.Version = objects.SpawnpointVersion
+	app.Version = versionNum
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{

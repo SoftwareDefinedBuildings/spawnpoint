@@ -31,7 +31,7 @@ func ConnectDocker() (chan *docker.APIEvents, error) {
 	return evChan, err
 }
 
-func GetSpawnedContainers() (map[string]*SpawnPointContainer, error) {
+func GetSpawnedContainers(alias string) (map[string]*SpawnPointContainer, error) {
 	rawrv, err := dkr.ListContainers(docker.ListContainersOptions{
 		All: true,
 	})
@@ -40,15 +40,16 @@ func GetSpawnedContainers() (map[string]*SpawnPointContainer, error) {
 	}
 
 	rv := make(map[string]*SpawnPointContainer)
+	pfx := fmt.Sprintf("/spawnpoint_%s_", alias)
 	for _, containerInfo := range rawrv {
 		for _, name := range containerInfo.Names {
-			if strings.HasPrefix(name, "/spawnpoint_") {
+			if strings.HasPrefix(name, pfx) {
 				container, err := dkr.InspectContainer(containerInfo.ID)
 				if err != nil {
 					return nil, err
 				}
 
-				svcName := name[len("/spawnpoint_"):]
+				svcName := name[len(pfx):]
 				rv[svcName] = &SpawnPointContainer{
 					Raw:         container,
 					ServiceName: svcName,
@@ -61,8 +62,8 @@ func GetSpawnedContainers() (map[string]*SpawnPointContainer, error) {
 	return rv, nil
 }
 
-func StopContainer(serviceName string, removeContainer bool) error {
-	curContainers, err := GetSpawnedContainers()
+func StopContainer(alias string, serviceName string, removeContainer bool) error {
+	curContainers, err := GetSpawnedContainers(alias)
 	if err != nil {
 		return err
 	}
@@ -90,15 +91,15 @@ func StopContainer(serviceName string, removeContainer bool) error {
 	return nil
 }
 
-func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPointContainer, error) {
+func RestartContainer(alias string, cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPointContainer, error) {
 	// First remove previous container
-	err := StopContainer(cfg.ServiceName, true)
+	err := StopContainer(alias, cfg.ServiceName, true)
 	if err != nil {
 		return nil, err
 	}
 
 	// Then rebuild image if necessary
-	imgname := "spawnpoint_image_" + cfg.ServiceName
+	imgname := fmt.Sprintf("spawnpoint_%s_image_%s", alias, cfg.ServiceName)
 	if rebuildImg {
 		err = rebuildImage(cfg, imgname)
 		if err != nil {
@@ -123,7 +124,7 @@ func RestartContainer(cfg *Manifest, bwRouter string, rebuildImg bool) (*SpawnPo
 	}
 
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
-		Name: "spawnpoint_" + cfg.ServiceName,
+		Name: fmt.Sprintf("spawnpoint_%s_%s", alias, cfg.ServiceName),
 		Config: &docker.Config{
 			WorkingDir:   "/srv/spawnpoint/",
 			OnBuild:      cfg.Build,
