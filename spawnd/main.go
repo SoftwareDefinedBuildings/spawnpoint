@@ -19,7 +19,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.4.0`
+const versionNum = `0.4.1`
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -232,6 +232,7 @@ func actionRun(c *cli.Context) error {
 	for i := 0; i < len(ologs); i++ {
 		ologs[i] = make(chan SLM, 10)
 	}
+	recoverPreviousState()
 
 	fmt.Printf("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
 		versionNum, ansi.ColorCode("reset"))
@@ -241,7 +242,6 @@ func actionRun(c *cli.Context) error {
 		go publishMessages(i)
 	}
 
-	recoverPreviousState()
 	for {
 		time.Sleep(10 * time.Second)
 	}
@@ -426,6 +426,12 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		}
 	}
 
+	if config.UseHostNet && !cfgs[id].AllowHostNet {
+		alias := cfgs[id].Alias
+		err := fmt.Errorf("Spawnpoint %s does not allow use of host network stack", alias)
+		panic(err)
+	}
+
 	evCh := make(chan svcEvent, 5)
 	logger := NewLogger(bwClients[id], cfgs[id].Path, cfgs[id].Alias, config.ServiceName)
 	mf := Manifest{
@@ -441,6 +447,7 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		Volumes:     config.Volumes,
 		logger:      logger,
 		OverlayNet:  config.OverlayNet,
+		UseHostNet:  config.UseHostNet,
 		eventChan:   &evCh,
 	}
 	go manageService(id, &mf)

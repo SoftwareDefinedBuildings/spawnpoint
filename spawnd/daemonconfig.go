@@ -8,4 +8,5 @@ type DaemonConfig struct {
 	ContainerRouter string `yaml:"containerRouter"`
 	MemAlloc        string `yaml:"memAlloc"`
 	CPUShares       uint64 `yaml:"cpuShares"`
+	AllowHostNet    bool   `yaml:"allowHostNet"`
 }

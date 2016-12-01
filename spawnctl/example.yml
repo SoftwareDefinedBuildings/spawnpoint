@@ -6,3 +6,4 @@ run: [./demosvc, 100]
 memAlloc: 512M
 cpuShares: 1024
 includedFiles: [params.yml]
+useHostNet: false

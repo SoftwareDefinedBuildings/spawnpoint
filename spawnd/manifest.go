@@ -16,6 +16,7 @@ type Manifest struct {
 	Volumes     []string
 	logger      *BWLogger
 	OverlayNet  string
+	UseHostNet  bool
 	eventChan   *chan svcEvent
 	restarting  bool
 	stopping    bool

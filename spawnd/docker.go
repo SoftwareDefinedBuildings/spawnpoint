@@ -116,7 +116,10 @@ func RestartContainer(alias string, cfg *Manifest, bwRouter string, rebuildImg b
 		envVars = append(envVars, "BW2_AGENT="+bwRouter)
 	}
 	netMode := "bridge"
-	if cfg.OverlayNet != "" {
+	if cfg.UseHostNet {
+		// If spawnpoint does not allow use of host network stack, we won't reach this point
+		netMode = "host"
+	} else if cfg.OverlayNet != "" {
 		netMode = cfg.OverlayNet
 		if err = createNetIfNecessary(cfg.OverlayNet); err != nil {
 			return nil, fmt.Errorf("Failed to create overlay net: %v", err)

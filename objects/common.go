@@ -36,6 +36,7 @@ type SvcConfig struct {
 	AutoRestart   bool     `yaml:"autoRestart"`
 	RestartInt    string   `yaml:"restartInt,omitempty"`
 	OverlayNet    string   `yaml:"overlayNet,omitempty"`
+	UseHostNet    bool     `yaml:"useHostNet"`
 }
 
 type SpawnPoint struct {

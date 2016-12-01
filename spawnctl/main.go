@@ -20,7 +20,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const versionNum = `0.3.4`
+const versionNum = `0.3.5`
 
 type prevDeployment struct {
 	URI        string
