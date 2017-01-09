@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -19,7 +21,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.4.1`
+const versionNum = `0.4.2`
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -822,14 +824,15 @@ func persistManifests(id int) {
 		}
 		runningSvcsLocks[id].Unlock()
 
-		mfstPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, manifests)
-		if err != nil {
-			panic(err)
-		} else {
-			if err = spInterfaces[id].PublishSignal("manifests", mfstPo); err != nil {
-				fmt.Printf("%s[WARN]%s Failed to persist manifests: %v\n", ansi.ColorCode("yellow+b"),
-					ansi.ColorCode("reset"), err)
-			}
+		var manifestRaw bytes.Buffer
+		mfstFileName := ".manifests-" + cfgs[id].Alias
+		encoder := gob.NewEncoder(&manifestRaw)
+		if err := encoder.Encode(manifests); err != nil {
+			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
+				ansi.ColorCode("reset"), err)
+		} else if err := ioutil.WriteFile(mfstFileName, manifestRaw.Bytes(), 0600); err != nil {
+			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
+				ansi.ColorCode("reset"), err)
 		}
 
 		time.Sleep(persistManifestPeriod * time.Second)
@@ -838,23 +841,19 @@ func persistManifests(id int) {
 
 func recoverPreviousState() {
 	for i := 0; i < len(cfgs); i++ {
-		mfstMsg := bwClients[i].QueryOneOrExit(&bw2.QueryParams{
-			URI: spInterfaces[i].SignalURI("manifests"),
-		})
-		if mfstMsg == nil {
-			return
-		}
-
-		msgPackPo := mfstMsg.GetOnePODF(bw2.PODFMsgPack)
-		if msgPackPo == nil {
-			fmt.Println("Error: Persisted manifests did not contain msgpack PO")
+		mfstFileName := ".manifests-" + cfgs[i].Alias
+		mfstBytes, err := ioutil.ReadFile(mfstFileName)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Printf("Error (%s): Failed to read persisted manifests: %v", cfgs[i].Alias, err)
+			}
 			return
 		}
 
 		var priorManifests []Manifest
-		if err := msgPackPo.(bw2.MsgPackPayloadObject).ValueInto(&priorManifests); err != nil {
-			fmt.Printf("Failed to unmarshal persistence data: %v\n", err)
-			return
+		decoder := gob.NewDecoder(bytes.NewReader(mfstBytes))
+		if err = decoder.Decode(&priorManifests); err != nil {
+			fmt.Printf("Error (%s): Failed to decode persisted manifests: %v", cfgs[i].Alias, err)
 		}
 
 		knownContainers, err := GetSpawnedContainers(cfgs[i].Alias)
