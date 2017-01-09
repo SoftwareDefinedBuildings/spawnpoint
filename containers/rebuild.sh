@@ -14,6 +14,12 @@ rsync -PHav --delete armv7/ ubuntu@10.4.10.200:~/spawnpointbuild
 ssh ubuntu@10.4.10.200 "cd spawnpointbuild && docker build --pull --no-cache -t $REPO_PREFIX/spawnpoint:armv7 . && docker push $REPO_PREFIX/spawnpoint:armv7"
 popd
 
+# Python Spawnable amd64
+pushd spawnable-py/amd64
+docker build --pull --no-cache -t $REPO_PREFIX/spawnable-py:amd64 .
+docker push $REPO_PREFIX/spawnable-py:amd64
+popd
+
 # Spawnd amd64
 cp ../spawnd/spawnd spawnd/amd64/
 pushd spawnd/amd64
