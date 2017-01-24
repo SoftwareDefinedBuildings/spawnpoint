@@ -21,7 +21,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.4.2`
+const versionNum = `0.4.3`
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -349,13 +349,6 @@ func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]
 	next++
 	buildcontents[next] = "RUN echo " + config.Entity + " | base64 --decode > entity.key"
 	next++
-	if config.AptRequires != "" {
-		buildcontents[next] = "RUN apt-get update && apt-get install -y " + config.AptRequires
-		next++
-	} else {
-		buildcontents[next] = "RUN echo 'no apt-requires'"
-		next++
-	}
 
 	if includeTarEnc != "" {
 		buildcontents[next] = "RUN echo " + includeTarEnc + " | base64 --decode > include.tar" +
@@ -372,14 +365,14 @@ func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]
 }
 
 func handleConfig(id int, msg *bw2.SimpleMessage) {
-	var config *objects.SvcConfig
+	var trueCfg *objects.SvcConfig
 
 	defer func() {
 		r := recover()
 		if r != nil {
 			var tag string
-			if config != nil {
-				tag = config.ServiceName
+			if trueCfg != nil {
+				tag = trueCfg.ServiceName
 			} else {
 				tag = "meta"
 			}
@@ -387,70 +380,79 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		}
 	}()
 
-	cfgPo, ok := msg.GetOnePODF(bw2.PODFSpawnpointConfig).(bw2.YAMLPayloadObject)
+	// We can assume that POs have same ordering at publisher and subscriber
+	trueCfgPo, ok := msg.POs[0].(bw2.YAMLPayloadObject)
 	if !ok {
-		return
+		panic("Service deployment config is not YAML")
+	} else if !msg.POs[0].IsTypeDF(bw2.PODFSpawnpointConfig) {
+		panic("Service deployment config has invalid PO type")
 	}
-	config = &objects.SvcConfig{}
-	err := cfgPo.ValueInto(&config)
-	if err != nil {
+	trueCfg = &objects.SvcConfig{}
+	if err := trueCfgPo.ValueInto(&trueCfg); err != nil {
 		panic(err)
 	}
-
-	if config.Image == "" {
-		config.Image = defaultSpawnpointImage
+	if !msg.POs[1].IsTypeDF(bw2.PODFString) {
+		panic("Malformed service config in deployment message")
 	}
+	origCfg := string(msg.POs[1].GetContents())
 
-	rawMem := config.MemAlloc
+	if trueCfg.Image == "" {
+		trueCfg.Image = defaultSpawnpointImage
+	}
+	rawMem := trueCfg.MemAlloc
 	memAlloc, err := objects.ParseMemAlloc(rawMem)
 	if err != nil {
 		panic(err)
 	}
 
-	econtents, err := base64.StdEncoding.DecodeString(config.Entity)
+	econtents, err := base64.StdEncoding.DecodeString(trueCfg.Entity)
 	if err != nil {
 		panic(err)
 	}
-	fileIncludePo := msg.GetOnePODF(bw2.PODFString)
+
 	var fileIncludeEnc string
-	if fileIncludePo != nil {
-		fileIncludeEnc = string(fileIncludePo.GetContents())
+	if len(msg.POs) > 2 {
+		if !msg.POs[2].IsTypeDF(bw2.PODFString) {
+			panic("Malformed included file encoding in deployment message")
+		}
+		fileIncludeEnc = string(msg.POs[2].GetContents())
 	}
-	buildcontents, err := constructBuildContents(config, fileIncludeEnc)
+	buildcontents, err := constructBuildContents(trueCfg, fileIncludeEnc)
 	if err != nil {
 		panic(err)
 	}
 	var restartWaitDur time.Duration
-	if config.RestartInt != "" {
-		restartWaitDur, err = time.ParseDuration(config.RestartInt)
+	if trueCfg.RestartInt != "" {
+		restartWaitDur, err = time.ParseDuration(trueCfg.RestartInt)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	if config.UseHostNet && !cfgs[id].AllowHostNet {
+	if trueCfg.UseHostNet && !cfgs[id].AllowHostNet {
 		alias := cfgs[id].Alias
 		err := fmt.Errorf("Spawnpoint %s does not allow use of host network stack", alias)
 		panic(err)
 	}
 
 	evCh := make(chan svcEvent, 5)
-	logger := NewLogger(bwClients[id], cfgs[id].Path, cfgs[id].Alias, config.ServiceName)
+	logger := NewLogger(bwClients[id], cfgs[id].Path, cfgs[id].Alias, trueCfg.ServiceName)
 	mf := Manifest{
-		ServiceName: config.ServiceName,
-		Entity:      econtents,
-		Image:       config.Image,
-		MemAlloc:    memAlloc,
-		CPUShares:   config.CPUShares,
-		Build:       buildcontents,
-		Run:         config.Run,
-		AutoRestart: config.AutoRestart,
-		RestartInt:  restartWaitDur,
-		Volumes:     config.Volumes,
-		logger:      logger,
-		OverlayNet:  config.OverlayNet,
-		UseHostNet:  config.UseHostNet,
-		eventChan:   &evCh,
+		ServiceName:    trueCfg.ServiceName,
+		Entity:         econtents,
+		Image:          trueCfg.Image,
+		MemAlloc:       memAlloc,
+		CPUShares:      trueCfg.CPUShares,
+		Build:          buildcontents,
+		Run:            trueCfg.Run,
+		AutoRestart:    trueCfg.AutoRestart,
+		RestartInt:     restartWaitDur,
+		Volumes:        trueCfg.Volumes,
+		logger:         logger,
+		OverlayNet:     trueCfg.OverlayNet,
+		UseHostNet:     trueCfg.UseHostNet,
+		eventChan:      &evCh,
+		OriginalConfig: origCfg,
 	}
 	go manageService(id, &mf)
 	evCh <- boot
@@ -773,17 +775,18 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 			}
 
 			msg := objects.SpawnpointSvcHb{
-				SpawnpointURI: spURI,
-				Name:          svcname,
-				Time:          time.Now().UnixNano(),
-				MemAlloc:      manifest.MemAlloc,
-				CPUShares:     manifest.CPUShares,
-				MemUsage:      float64(stats.MemoryStats.Usage) / (1024 * 1024),
-				NetworkRx:     float64(stats.Network.RxBytes) / (1024 * 1024),
-				NetworkTx:     float64(stats.Network.TxBytes) / (1024 * 1024),
-				MbRead:        mbRead,
-				MbWritten:     mbWritten,
-				CPUPercent:    lastCPUPercentage,
+				SpawnpointURI:  spURI,
+				Name:           svcname,
+				Time:           time.Now().UnixNano(),
+				MemAlloc:       manifest.MemAlloc,
+				CPUShares:      manifest.CPUShares,
+				MemUsage:       float64(stats.MemoryStats.Usage) / (1024 * 1024),
+				NetworkRx:      float64(stats.Network.RxBytes) / (1024 * 1024),
+				NetworkTx:      float64(stats.Network.TxBytes) / (1024 * 1024),
+				MbRead:         mbRead,
+				MbWritten:      mbWritten,
+				CPUPercent:     lastCPUPercentage,
+				OriginalConfig: manifest.OriginalConfig,
 			}
 
 			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
@@ -809,16 +812,17 @@ func persistManifests(id int) {
 		for _, mfstPtr := range runningServices[id] {
 			// Make a deep copy
 			manifests[i] = Manifest{
-				ServiceName: mfstPtr.ServiceName,
-				Entity:      mfstPtr.Entity,
-				Image:       mfstPtr.Image,
-				MemAlloc:    mfstPtr.MemAlloc,
-				CPUShares:   mfstPtr.CPUShares,
-				Build:       mfstPtr.Build,
-				Run:         mfstPtr.Run,
-				AutoRestart: mfstPtr.AutoRestart,
-				RestartInt:  mfstPtr.RestartInt,
-				Volumes:     mfstPtr.Volumes,
+				ServiceName:    mfstPtr.ServiceName,
+				Entity:         mfstPtr.Entity,
+				Image:          mfstPtr.Image,
+				MemAlloc:       mfstPtr.MemAlloc,
+				CPUShares:      mfstPtr.CPUShares,
+				Build:          mfstPtr.Build,
+				Run:            mfstPtr.Run,
+				AutoRestart:    mfstPtr.AutoRestart,
+				RestartInt:     mfstPtr.RestartInt,
+				Volumes:        mfstPtr.Volumes,
+				OriginalConfig: mfstPtr.OriginalConfig,
 			}
 			i++
 		}

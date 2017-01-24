@@ -6,12 +6,3 @@ cpuShares: 2048
 localRouter: 172.17.0.1:28589
 containerRouter: 172.17.0.1:28589
 allowHostNet: false
-
-entity: /home/jack/bosswave/keys/jackDev.ent
-path: jkolb/spawnpoint/beta
-alias: beta
-memAlloc: 2G
-cpuShares: 2048
-localRouter: 172.17.0.1:28589
-containerRouter: 172.17.0.1:28589
-allowHostNet: true

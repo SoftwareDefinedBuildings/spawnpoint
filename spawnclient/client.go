@@ -103,13 +103,14 @@ func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, map[str
 
 				usedCPUShares := uint64(math.Ceil(svcHb.CPUPercent * objects.SharesPerCore))
 				newService := objects.Service{
-					Name:          svcHb.Name,
-					HostURI:       svcHb.SpawnpointURI,
-					LastSeen:      time.Unix(0, svcHb.Time),
-					MemAlloc:      svcHb.MemAlloc,
-					CPUShares:     svcHb.CPUShares,
-					MemUsage:      svcHb.MemUsage,
-					CPUShareUsage: usedCPUShares,
+					Name:           svcHb.Name,
+					HostURI:        svcHb.SpawnpointURI,
+					LastSeen:       time.Unix(0, svcHb.Time),
+					MemAlloc:       svcHb.MemAlloc,
+					CPUShares:      svcHb.CPUShares,
+					MemUsage:       svcHb.MemUsage,
+					CPUShareUsage:  usedCPUShares,
+					OriginalConfig: svcHb.OriginalConfig,
 				}
 				svcs = append(svcs, newService)
 			}
@@ -122,6 +123,40 @@ func (sc *SpawnClient) Inspect(spawnpointURI string) ([]objects.Service, map[str
 	}
 
 	return svcs, metadata, nil
+}
+
+func (sc *SpawnClient) InspectService(spawnpointURI string, svcName string) (*objects.Service, error) {
+	_, ifcClient := sc.newIfcClient(spawnpointURI)
+	svcHbMsg, err := sc.bwClient.QueryOne(&bw2.QueryParams{
+		URI: ifcClient.SignalURI("heartbeat/" + svcName),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, po := range svcHbMsg.POs {
+		if po.IsTypeDF(bw2.PODFSpawnpointSvcHb) {
+			svcHb := objects.SpawnpointSvcHb{}
+			err = po.(bw2.MsgPackPayloadObject).ValueInto(&svcHb)
+			if err != nil {
+				return nil, fmt.Errorf("Received malformed service heartbeat: %v", err)
+			}
+
+			usedCPUShares := uint64(math.Ceil(svcHb.CPUPercent * objects.SharesPerCore))
+			newService := objects.Service{
+				Name:           svcHb.Name,
+				HostURI:        svcHb.SpawnpointURI,
+				LastSeen:       time.Unix(0, svcHb.Time),
+				MemAlloc:       svcHb.MemAlloc,
+				CPUShares:      svcHb.CPUShares,
+				MemUsage:       svcHb.MemUsage,
+				CPUShareUsage:  usedCPUShares,
+				OriginalConfig: svcHb.OriginalConfig,
+			}
+			return &newService, nil
+		}
+	}
+	return nil, errors.New("Received malformed service heartbeat")
 }
 
 func (sc *SpawnClient) RestartService(baseURI string, name string) (chan *objects.SPLogMsg, error) {
@@ -224,11 +259,12 @@ func createArchiveEncoding(includedDirs []string, includedFiles []string) (strin
 	return base64.StdEncoding.EncodeToString(rawBytes), nil
 }
 
-func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, name string) (chan *objects.SPLogMsg, error) {
+func (sc *SpawnClient) DeployService(rawConfig string, config *objects.SvcConfig, spURI string, name string) (chan *objects.SPLogMsg, error) {
 	err := validateConfiguration(config)
 	if err != nil {
 		return nil, fmt.Errorf("Invalid config file: %v", err)
 	}
+
 	if config.Entity, err = encodeEntityFile(config.Entity); err != nil {
 		return nil, fmt.Errorf("Failed to encode entity file: %v", err)
 	}
@@ -264,12 +300,14 @@ func (sc *SpawnClient) DeployService(config *objects.SvcConfig, spURI string, na
 	}
 
 	// Prepare payload objects
-	pos := make([]bw2.PayloadObject, 1)
+	pos := make([]bw2.PayloadObject, 2)
 	configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to serialize configuration: %v", err)
 	}
 	pos[0] = configPo
+	pos[1] = bw2.CreateStringPayloadObject(rawConfig)
+
 	includeEnc, err := createArchiveEncoding(config.IncludedDirs, config.IncludedFiles)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to encode included files: %v", err)

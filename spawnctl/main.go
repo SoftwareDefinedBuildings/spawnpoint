@@ -20,7 +20,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const versionNum = `0.3.5`
+const versionNum = `0.3.6`
 
 type prevDeployment struct {
 	URI        string
@@ -156,6 +156,23 @@ func main() {
 				cli.StringFlag{
 					Name:  "name, n",
 					Usage: "name of the service to stop",
+					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "inspect",
+			Usage:  "Inspect a specific service running on a spawnpoint",
+			Action: actionInspect,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "uri, u",
+					Usage: "base URI of the spawnpoint running the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "name of the service to inspect",
 					Value: "",
 				},
 			},
@@ -296,6 +313,45 @@ func actionScan(c *cli.Context) error {
 	return nil
 }
 
+func actionInspect(c *cli.Context) error {
+	entityFile := c.GlobalString("entity")
+	if entityFile == "" {
+		fmt.Println("No Bosswave entity specified")
+		os.Exit(1)
+	}
+	uriparam := c.String("uri")
+	baseuri := fixuri(uriparam)
+	if len(baseuri) == 0 {
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
+	}
+
+	nameParam := c.String("name")
+	if nameParam == "" {
+		fmt.Println("Missing 'name' parameter")
+		os.Exit(1)
+	}
+
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entityFile)
+	if err != nil {
+		fmt.Println("Failed to initialize spawn client:", err)
+		os.Exit(1)
+	}
+	svcInfo, err := spawnClient.InspectService(uriparam, nameParam)
+	if err != nil {
+		fmt.Println("Spawnpoint scan failed:", err)
+		os.Exit(1)
+	}
+
+	printLastSeen(svcInfo.LastSeen, svcInfo.Name, svcInfo.HostURI)
+	fmt.Printf("CPU Usage: %v/%v Shares\n", svcInfo.CPUShareUsage, svcInfo.CPUShares)
+	fmt.Printf("Memory Usage: %v/%v MiB\n", svcInfo.MemUsage, svcInfo.MemAlloc)
+	fmt.Printf("Original Configuration File:\n")
+	fmt.Printf(indentText(svcInfo.OriginalConfig, 1))
+
+	return nil
+}
+
 func tailLog(log chan *objects.SPLogMsg) {
 	for logMsg := range log {
 		tstring := time.Unix(0, logMsg.Time).Format("01/02 15:04:05")
@@ -431,12 +487,18 @@ func actionDeploy(c *cli.Context) error {
 	}
 	svcConfig.ServiceName = svcName
 
+	rawConfig, err := ioutil.ReadFile(cfgFile)
+	if err != nil {
+		fmt.Println("Failed to read service configuration file:", err)
+		os.Exit(1)
+	}
+
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
 		fmt.Println("Failed to initialize spawn client:", err)
 		os.Exit(1)
 	}
-	log, err := spawnClient.DeployService(svcConfig, spURI, svcName)
+	log, err := spawnClient.DeployService(string(rawConfig), svcConfig, spURI, svcName)
 	if err != nil {
 		fmt.Printf("%s[ERROR]%s Service deployment failed, %v\n", ansi.ColorCode("red+b"),
 			ansi.ColorCode("reset"), err)
@@ -534,4 +596,19 @@ func actionDeployLast(c *cli.Context) {
 		ctxt.Set("name", prevDep.Name)
 		actionDeploy(ctxt)
 	}
+}
+
+func indentText(s string, indentLevel int) string {
+	lines := strings.Split(s, "\n")
+	prefix := ""
+	for i := 0; i < indentLevel; i++ {
+		prefix = "    " + prefix
+	}
+	for i := 0; i < len(lines); i++ {
+		if len(strings.TrimSpace(lines[i])) > 0 {
+			lines[i] = prefix + lines[i]
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }

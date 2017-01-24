@@ -26,7 +26,6 @@ type SvcConfig struct {
 	Image         string   `yaml:"image"`
 	Build         []string `yaml:"build,omitempty"`
 	Source        string   `yaml:"source,omitempty"`
-	AptRequires   string   `yaml:"aptRequires,omitempty"`
 	Run           []string `yaml:"run,omitempty"`
 	MemAlloc      string   `yaml:"memAlloc"`
 	CPUShares     uint64   `yaml:"cpuShares"`
@@ -48,13 +47,14 @@ type SpawnPoint struct {
 }
 
 type Service struct {
-	Name          string
-	HostURI       string
-	LastSeen      time.Time
-	MemAlloc      uint64
-	CPUShares     uint64
-	MemUsage      float64
-	CPUShareUsage uint64
+	Name           string
+	HostURI        string
+	LastSeen       time.Time
+	MemAlloc       uint64
+	CPUShares      uint64
+	MemUsage       float64
+	CPUShareUsage  uint64
+	OriginalConfig string
 }
 
 func (sp *SpawnPoint) Good() bool {
@@ -93,15 +93,16 @@ type SPLogMsg struct {
 }
 
 type SpawnpointSvcHb struct {
-	SpawnpointURI string
-	Name          string
-	Time          int64
-	MemAlloc      uint64
-	CPUShares     uint64
-	MemUsage      float64
-	NetworkRx     float64
-	NetworkTx     float64
-	MbRead        float64
-	MbWritten     float64
-	CPUPercent    float64
+	SpawnpointURI  string
+	Name           string
+	Time           int64
+	MemAlloc       uint64
+	CPUShares      uint64
+	MemUsage       float64
+	NetworkRx      float64
+	NetworkTx      float64
+	MbRead         float64
+	MbWritten      float64
+	CPUPercent     float64
+	OriginalConfig string
 }
