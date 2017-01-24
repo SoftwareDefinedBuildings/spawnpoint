@@ -89,6 +89,11 @@ Currently, the valid parameters are:
 * `cpuShares` (required): The total number of CPU shares to be used by spawned
   services. This should be 1024 shares per core.
 
+* `allowHostNet` (optional): If enabled, this allows containers running on the
+  Spawnpoint to use the host's network stack directly instead of Docker's bridge
+  interface. Note that this represents a major security risk. Don't enable this
+  unless you are very confident that you need it.
+
 A typical Spawnpoint configuration file might look as follows. Note that the
 `localRouter` parameter is omitted, and thus it takes on the default value.
 ```yaml
@@ -245,6 +250,11 @@ The valid parameters currently are:
   other by name rather than IP address when using native means of communication.
   This is unnecessary for BOSSWAVE services.
 
+* `useHostNet` (optional): If the Spawnpoint daemon allows it, Docker containers
+  running on that Spawnpoint may directly use the host machine's network stack
+  rather than Docker's bridge interface. This presents a major security risk,
+  so this setup should be avoided if at all possible.
+
 For example, to run [demosvc](https://github.com/jkolb1/demosvc), the following
 configuration could be used.
 
@@ -259,14 +269,6 @@ autoRestart: true
 includedFiles: [params.yml]
 volumes: [foo, bar]
 ```
-
-#### Service Parameters
-Parameters may no longer be included directly in service configuration files.
-Instead, services may include arbitrary files to provide configuration or
-bootstrapping information by using the `includedFiles` and `includedDirs`
-fields. However, support for parsing a YAML file containing a sequence of
-key/value attribute pairs is still supported by the `spawnable` library through
-the `GetParams` function and its relatives.
 
 #### Conveniently Rerunning a Deployment
 You can use the `deploy-last` command to rerun the same `deploy` command that
@@ -293,6 +295,34 @@ $ spawnctl deploy-last -f history_file
 ```
 This instructs Spawnpoint to use previous `deploy` commands saved in
 `history_file`.
+
+### Inspecting a Running Service
+Use the `inspect` command to view detailed information about a currently running
+or recently running service. This command requires two parameters:
+  1. The URI of the Spawnpoint where the service is running
+  2. The name of the service
+
+Currently, you can view information about the service's liveness, CPU usage,
+and memory consumption. `spawnctl` also shows the contents of the configuration
+file that was used to spawn the service.
+
+For example:
+```
+$ spawnctl inspect -u jkolb/spawnpoint/alpha -n demosvc
+[demosvc] seen 23 Jan 17 21:03 PST (43m41.5s) ago at jkolb/spawnpoint/alpha
+CPU Usage: 42/1024 Shares
+Memory Usage: 5.29296875/512 MiB
+Original Configuration File:
+    entity: /home/jack/bosswave/keys/jackDev.ent
+    image: jhkolb/spawnpoint:amd64
+    source: git+http://github.com/jhkolb/demosvc
+    build: [go get -d, go build -o demosvc]
+    run: [./demosvc, 100]
+    memAlloc: 512M
+    cpuShares: 1024
+    includedFiles: [params.yml]
+    useHostNet: false
+```
 
 ### Restarting/Stopping a Service
 To restart or stop a service, you must know the base URI of the Spawnpoint on
