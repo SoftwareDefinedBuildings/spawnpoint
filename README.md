@@ -135,6 +135,18 @@ container:
    host's Docker daemon. Unless you have an unusual Docker configuration, this
    volume will map between identical locations in the host and container.
 
+It is important to note that the `spawnd` container has the entrypoint:
+```
+spawnd run -c /etc/spawnd/config.yml -m /etc/spawnd/metadata.yml`
+```
+As a result, the container will look for YAML configuration and metadata files
+under `/etc/spawnd` on your machine. Even if you do not wish to advertise any
+metadata, you will need to include a metadata file in this directory. This is
+because the absence of such a file will result in an error, just as if the `-m`
+flag referred to a non-existent file when running `spawnd` natively from the
+command line. An easy workaround is to include an empty `metadata.yml` file in
+`/etc/spawnd`, as this means no metadata will be advertised.
+
 ## Interacting With Spawnpoints Using `spawnctl`
 The best way to make use of running Spawnpoints is through the `spawnctl`
 command line utility. Like the `bw2` command line tool, `spawnctl` will
@@ -226,7 +238,7 @@ The valid parameters currently are:
 * `restartInt` (optional): If `autoRestart` is enabled, this specifies the
   amount of time wait after a service has terminated before attempting a
   restart. The normal Go duration syntax is used. For example, a value of "30s"
-  signifies a 30-second delay, while a value of "5m" signifies a 5-minute delay.  
+  signifies a 30-second delay, while a value of "5m" signifies a 5-minute delay.
 
 * `includedFiles` (optional): A list of paths to files that are to be included
   in the container. All files, regardless of their location on the machine from
