@@ -137,7 +137,7 @@ container:
 
 It is important to note that the `spawnd` container has the entrypoint:
 ```
-spawnd run -c /etc/spawnd/config.yml -m /etc/spawnd/metadata.yml`
+spawnd run -c /etc/spawnd/config.yml -m /etc/spawnd/metadata.yml
 ```
 As a result, the container will look for YAML configuration and metadata files
 under `/etc/spawnd` on your machine. Even if you do not wish to advertise any
