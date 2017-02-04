@@ -146,10 +146,6 @@ func initializeBosswave() ([]*bw2.BW2Client, error) {
 
 func actionRun(c *cli.Context) error {
 	runningServices = make([](map[string]*Manifest), len(cfgs))
-	ologs = make([](chan SLM), len(cfgs))
-	for i := 0; i < len(ologs); i++ {
-		ologs[i] = make(chan SLM, 100)
-	}
 
 	var err error
 	cfgs, err = readConfigFromFile(c.String("config"))
@@ -564,6 +560,12 @@ func manageService(id int, mfst *Manifest) {
 				}
 			}
 
+			// Add the new manifest before we start the container
+			// We don't want any time interval where the container is running but doesn't have a manifest
+			runningSvcsLocks[id].Lock()
+			runningServices[id][mfst.ServiceName] = mfst
+			runningSvcsLocks[id].Unlock()
+
 			// Now start the container
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Booting service"}
 			container, err := RestartContainer(alias, mfst, cfgs[id].ContainerRouter, true)
@@ -574,14 +576,15 @@ func manageService(id int, mfst *Manifest) {
 				availableMem[id] += int64(mfst.MemAlloc)
 				availableCPUShares[id] += int64(mfst.CPUShares)
 				availLocks[id].Unlock()
+
+				runningSvcsLocks[id].Lock()
+				delete(runningServices[id], mfst.ServiceName)
+				runningSvcsLocks[id].Unlock()
 				return
 			}
 			mfst.Container = container
 			msg := "[SUCCESS] Container (re)start successful"
 			ologs[id] <- SLM{mfst.ServiceName, msg}
-			runningSvcsLocks[id].Lock()
-			runningServices[id][mfst.ServiceName] = mfst
-			runningSvcsLocks[id].Unlock()
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
 		case restart:
