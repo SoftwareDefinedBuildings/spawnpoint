@@ -33,6 +33,10 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 	return &SpawnClient{bwClient: BWC}, nil
 }
 
+func NewFromBwClient(bwc *bw2.BW2Client) (*SpawnClient, error) {
+    return &SpawnClient{bwClient: bwc}, nil
+}
+
 func (sc *SpawnClient) BWStatus() {
 	sc.bwClient.StatLine()
 }
