@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/gob"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/immesys/spawnpoint/spawnclient"
-	"gopkg.in/vmihailenco/msgpack.v2"
 	"gopkg.in/yaml.v2"
 
 	"github.com/mgutz/ansi"
@@ -26,6 +26,7 @@ type prevDeployment struct {
 	URI        string
 	ConfigFile string
 	Name       string
+	Entity     string
 }
 
 func main() {
@@ -475,8 +476,13 @@ func actionDeploy(c *cli.Context) error {
 		os.Exit(1)
 	}
 
-	deploymentRecord := prevDeployment{spURI, cfgFile, svcName}
-	if err := saveDeployment(deploymentRecord); err != nil {
+	deployment := prevDeployment{
+		URI:        spURI,
+		ConfigFile: cfgFile,
+		Name:       svcName,
+		Entity:     entity,
+	}
+	if err := saveDeployment(deployment); err != nil {
 		fmt.Println("Warning: Unable to save to spawnpoint history file:", err)
 	}
 
@@ -511,32 +517,52 @@ func actionDeploy(c *cli.Context) error {
 	return nil
 }
 
-func saveDeployment(dep prevDeployment) error {
+func getDeploymentHistoryFile() string {
 	historyFile := os.Getenv("SPAWNPOINT_HISTORY_FILE")
 	if historyFile == "" {
 		historyFile = os.Getenv("HOME") + "/.spawnpoint_history"
 	}
-	prevDeps := make(map[string]prevDeployment)
-	rawBytes, err := ioutil.ReadFile(historyFile)
+	return historyFile
+}
+
+func readPrevDeploymentFile(fileName string) (*map[string]prevDeployment, error) {
+	var oldDeployments map[string]prevDeployment
+	fileReader, err := os.Open(fileName)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return err
+			return nil, err
 		}
-	} else {
-		err = msgpack.Unmarshal(rawBytes, &prevDeps)
-		if err != nil {
-			return err
-		}
+		oldDeployments = make(map[string]prevDeployment)
+		return &oldDeployments, nil
+	}
+	defer fileReader.Close()
+
+	decoder := gob.NewDecoder(fileReader)
+	if err = decoder.Decode(&oldDeployments); err != nil {
+		return nil, err
+	}
+	return &oldDeployments, nil
+}
+
+func saveDeployment(dep prevDeployment) error {
+	oldDeployments, err := readPrevDeploymentFile(getDeploymentHistoryFile())
+	if err != nil {
+		return err
 	}
 
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	prevDeps[currentDir] = dep
-	rawBytes, err = msgpack.Marshal(prevDeps)
-	err = ioutil.WriteFile(historyFile, rawBytes, 0600)
+	(*oldDeployments)[currentDir] = dep
+
+	fileWriter, err := os.Create(getDeploymentHistoryFile())
 	if err != nil {
+		return err
+	}
+	defer fileWriter.Close()
+	encoder := gob.NewEncoder(fileWriter)
+	if err = encoder.Encode(*oldDeployments); err != nil {
 		return err
 	}
 	return nil
@@ -545,40 +571,33 @@ func saveDeployment(dep prevDeployment) error {
 func actionDeployLast(c *cli.Context) {
 	sourceFile := c.String("file")
 	if sourceFile == "" {
-		sourceFile = os.Getenv("HOME") + "/.spawnpoint_history"
+		sourceFile = getDeploymentHistoryFile()
 	}
 
-	previousDeps := make(map[string]prevDeployment)
-	rawBytes, err := ioutil.ReadFile(sourceFile)
+	oldDeployments, err := readPrevDeploymentFile(sourceFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No previous deployment for this directory")
-		} else {
-			fmt.Printf("Failed to read history file: %v\n", err)
-		}
+		fmt.Printf("Failed to read deployment history file: %v\n", err)
 		os.Exit(1)
 	}
-	if err = msgpack.Unmarshal(rawBytes, &previousDeps); err != nil {
-		fmt.Println("Error: history file corrupted")
-		os.Exit(1)
-	}
+
 	currentDir, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("Failed to get current working directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	prevDep, ok := previousDeps[currentDir]
+	prevDep, ok := (*oldDeployments)[currentDir]
 	if !ok {
 		fmt.Println("No previous deployment for this directory")
 		os.Exit(1)
 	}
+	command := fmt.Sprintf("spawnctl -e %s deploy -u %s -c %s -n %s", prevDep.Entity,
+		prevDep.URI, prevDep.ConfigFile, prevDep.Name)
 
 	proceed := c.Bool("yes")
 	if !proceed {
 		fmt.Println("This will run:")
-		fmt.Printf("\t%sspawnctl deploy -u %s -c %s -n %s%s\n", ansi.ColorCode("green"),
-			prevDep.URI, prevDep.ConfigFile, prevDep.Name, ansi.ColorCode("reset"))
+		fmt.Printf("\t%s%s%s\n", ansi.ColorCode("green"), command, ansi.ColorCode("reset"))
 		fmt.Println("Proceed? [Y/n]")
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
@@ -590,6 +609,7 @@ func actionDeployLast(c *cli.Context) {
 		flags.String("uri", "", "")
 		flags.String("config", "", "")
 		flags.String("name", "", "")
+		c.GlobalSet("entity", prevDep.Entity)
 		ctxt := cli.NewContext(c.App, flags, c)
 		ctxt.Set("uri", prevDep.URI)
 		ctxt.Set("config", prevDep.ConfigFile)
