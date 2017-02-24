@@ -55,9 +55,10 @@ func main() {
 			Action: actionScan,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "a base URI to scan from",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "a base URI to scan from",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.BoolFlag{
 					Name:  "all, a",
@@ -83,9 +84,10 @@ func main() {
 			Action: actionDeploy,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "a base URI to deploy to",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "a base URI to deploy to",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "config, c",
@@ -120,9 +122,10 @@ func main() {
 			Action: actionTail,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "a base URI of spawnpoint running the service",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "a base URI of spawnpoint running the service",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "name, n",
@@ -137,9 +140,10 @@ func main() {
 			Action: actionRestart,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "base URI of spawnpoint running the service",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "base URI of spawnpoint running the service",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "name, n",
@@ -154,9 +158,10 @@ func main() {
 			Action: actionStop,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "base URI of spawnpoint running the service",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "base URI of spawnpoint running the service",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "name, n",
@@ -171,9 +176,10 @@ func main() {
 			Action: actionInspect,
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name:  "uri, u",
-					Usage: "base URI of the spawnpoint running the service",
-					Value: "",
+					Name:   "uri, u",
+					Usage:  "base URI of the spawnpoint running the service",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "name, n",
