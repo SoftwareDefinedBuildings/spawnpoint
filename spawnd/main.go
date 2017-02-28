@@ -22,6 +22,7 @@ import (
 )
 
 const versionNum = `0.4.3`
+const defaultZombiePeriod = 2 * time.Minute
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -425,6 +426,16 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		}
 	}
 
+	var zombiePeriod time.Duration
+	if trueCfg.ZombiePeriod != "" {
+		zombiePeriod, err = time.ParseDuration(trueCfg.ZombiePeriod)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		zombiePeriod = defaultZombiePeriod
+	}
+
 	if trueCfg.UseHostNet && !cfgs[id].AllowHostNet {
 		alias := cfgs[id].Alias
 		err := fmt.Errorf("Spawnpoint %s does not allow use of host network stack", alias)
@@ -449,6 +460,7 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		UseHostNet:     trueCfg.UseHostNet,
 		eventChan:      &evCh,
 		OriginalConfig: origCfg,
+		ZombiePeriod:   zombiePeriod,
 	}
 	go manageService(id, &mf)
 	evCh <- boot
@@ -719,7 +731,7 @@ func manageService(id int, mfst *Manifest) {
 				availLocks[id].Unlock()
 
 				// Defer removal of the manifest in case user wants to restart
-				time.AfterFunc(objects.ZombiePeriod, func() {
+				time.AfterFunc(mfst.ZombiePeriod, func() {
 					runningSvcsLocks[id].Lock()
 					latestMfst, ok := runningServices[id][mfst.ServiceName]
 					if ok && latestMfst.Container == nil {

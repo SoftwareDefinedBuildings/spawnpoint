@@ -8,7 +8,6 @@ import (
 
 const SharesPerCore = 1024
 
-const ZombiePeriod = 2 * time.Minute
 const MetadataCutoff = 1 * time.Minute
 
 type SpawnPointHb struct {
@@ -36,6 +35,7 @@ type SvcConfig struct {
 	RestartInt    string   `yaml:"restartInt,omitempty"`
 	OverlayNet    string   `yaml:"overlayNet,omitempty"`
 	UseHostNet    bool     `yaml:"useHostNet"`
+	ZombiePeriod  string   `yaml:"zombiePeriod,omitempty"`
 }
 
 type SpawnPoint struct {

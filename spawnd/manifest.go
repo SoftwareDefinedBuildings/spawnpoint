@@ -21,4 +21,5 @@ type Manifest struct {
 	restarting     bool
 	stopping       bool
 	OriginalConfig string
+	ZombiePeriod   time.Duration
 }
