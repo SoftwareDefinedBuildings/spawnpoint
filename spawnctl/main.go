@@ -266,6 +266,7 @@ func actionScan(c *cli.Context) error {
 		fmt.Println("Missing 'uri' parameter")
 		os.Exit(1)
 	}
+
 	if strings.HasSuffix(baseuri, "/") {
 		baseuri += "*"
 	} else if !strings.HasSuffix(baseuri, "/*") {
@@ -277,6 +278,10 @@ func actionScan(c *cli.Context) error {
 		fmt.Println("Failed to initialize spawn client:", err)
 		os.Exit(1)
 	}
+
+	// A scan returns un-aliased URIs; convert them to more readable form
+	namespaceAlias := baseuri[:strings.Index(baseuri, "/")]
+	namespaceVk, _ := spawnClient.ConvertAliasToVK(namespaceAlias)
 	spawnPoints, err := spawnClient.Scan(baseuri)
 	if err != nil {
 		fmt.Println("Spawnpoint scan failed:", err)
@@ -285,8 +290,12 @@ func actionScan(c *cli.Context) error {
 
 	fmt.Printf("Discovered %v SpawnPoint(s):\n", len(spawnPoints))
 	// Print out status information on all discovered spawnpoints
-	for _, sp := range spawnPoints {
-		printLastSeen(sp.LastSeen, sp.Alias, sp.URI)
+	for rawURI, sp := range spawnPoints {
+		effectiveURI := rawURI
+		if namespaceVk != "" {
+			effectiveURI = strings.Replace(rawURI, namespaceVk, namespaceAlias, 1)
+		}
+		printLastSeen(sp.LastSeen, sp.Alias, effectiveURI)
 		fmt.Printf("  Available Memory: %v MB, Available Cpu Shares: %v\n",
 			sp.AvailableMem, sp.AvailableCPUShares)
 	}
@@ -413,8 +422,7 @@ func issueServiceCommand(c *cli.Context, command string) error {
 	if err != nil {
 		fmt.Println("Failed to scan for spawnpoint:", err)
 	}
-	spAlias := uri[strings.LastIndex(uri, "/")+1:]
-	sp, ok := spawnpoints[spAlias]
+	sp, ok := spawnpoints[uri]
 	if !ok {
 		fmt.Printf("Error: spawnpoint at %s does not exist\n", uri)
 		os.Exit(1)

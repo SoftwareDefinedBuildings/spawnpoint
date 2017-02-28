@@ -34,7 +34,7 @@ func New(router string, entityFile string) (*SpawnClient, error) {
 }
 
 func NewFromBwClient(bwc *bw2.BW2Client) (*SpawnClient, error) {
-    return &SpawnClient{bwClient: bwc}, nil
+	return &SpawnClient{bwClient: bwc}, nil
 }
 
 func (sc *SpawnClient) BWStatus() {
@@ -77,7 +77,7 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 					AvailableCPUShares: heartbeat.AvailableCPUShares,
 				}
 
-				spawnpoints[heartbeat.Alias] = sp
+				spawnpoints[uri] = sp
 			}
 		}
 	}
@@ -274,12 +274,19 @@ func (sc *SpawnClient) DeployService(rawConfig string, config *objects.SvcConfig
 	}
 
 	// Look up target spawnpoint
-	spAlias := spURI[strings.LastIndex(spURI, "/")+1:]
 	spawnpoints, err := sc.Scan(spURI)
 	if err != nil {
 		return nil, fmt.Errorf("Initial spawnpoint scan failed: %v", err)
 	}
-	spawnpoint, ok := spawnpoints[spAlias]
+
+	// Scan returns Spawnpoints indexed by the un-aliased URIs
+	effectiveURI := spURI
+	potentialAlias := spURI[:strings.Index(spURI, "/")]
+	if vk, err := sc.ConvertAliasToVK(potentialAlias); err == nil {
+		effectiveURI = strings.Replace(effectiveURI, potentialAlias, vk, 1)
+	}
+
+	spawnpoint, ok := spawnpoints[effectiveURI]
 	if !ok {
 		return nil, fmt.Errorf("Spawnpoint %s not found", spURI)
 	}
@@ -324,4 +331,12 @@ func (sc *SpawnClient) DeployService(rawConfig string, config *objects.SvcConfig
 		return nil, fmt.Errorf("Failed to publish configuration: %v", err)
 	}
 	return log, nil
+}
+
+func (sc *SpawnClient) ConvertAliasToVK(alias string) (string, error) {
+	rawData, _, err := sc.bwClient.ResolveLongAlias(alias)
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(rawData), nil
 }
