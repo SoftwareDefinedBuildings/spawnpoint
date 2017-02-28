@@ -311,8 +311,7 @@ func actionScan(c *cli.Context) error {
 
 			fmt.Printf("%sServices:%s\n", ansi.ColorCode("blue+b"), ansi.ColorCode("reset"))
 			for _, svc := range svcs {
-				if (objects.IsSpawnPointGood(svc.LastSeen) || c.Bool("all")) &&
-					time.Now().Sub(svc.LastSeen) < objects.ZombiePeriod {
+				if objects.IsSpawnPointGood(svc.LastSeen) || c.Bool("all") {
 					fmt.Print("  • ")
 					printLastSeen(svc.LastSeen, svc.Name, "")
 					fmt.Printf("      Memory: %.2f/%d MB, CPU Shares: ~%d/%d\n", svc.MemUsage, svc.MemAlloc,

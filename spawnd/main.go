@@ -727,6 +727,8 @@ func manageService(id int, mfst *Manifest) {
 						close(*mfst.eventChan)
 					}
 					runningSvcsLocks[id].Unlock()
+
+					depersistSvcHb(id, mfst.ServiceName)
 				})
 			}
 
@@ -797,12 +799,20 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 				panic(err)
 			}
 			if err = spInterfaces[id].PublishSignal("heartbeat/"+svcname, hbPo); err != nil {
-				fmt.Printf("%s[WARN]%s Failed to publish heartbeat for service %s: %v",
+				fmt.Printf("%s[WARN]%s Failed to publish heartbeat for service %s: %v\n",
 					ansi.ColorCode("yellow+b"), ansi.ColorCode("reset"), svcname, err)
 			}
 
 			lastEmitted = time.Now()
 		}
+	}
+}
+
+func depersistSvcHb(id int, svcname string) {
+	// Publishing a message with no POs is effectively a "de-persist" operation
+	if err := spInterfaces[id].PublishSignal("heartbeat/" + svcname); err != nil {
+		fmt.Printf("%s[WARN]%s Failed to de-persist heartbeat for servfice %s: %v\n",
+			ansi.ColorCode("yellow+b"), ansi.ColorCode("reset"), svcname, err)
 	}
 }
 
