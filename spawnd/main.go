@@ -88,6 +88,18 @@ func main() {
 				},
 			},
 		},
+		{
+			Name:   "decommission",
+			Usage:  "Decomission a spawnpoint daemon",
+			Action: actionDecommission,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "config, c",
+					Usage: "Specify a configuration file for the daemon",
+					Value: "config.yml",
+				},
+			},
+		},
 	}
 
 	app.Run(os.Args)
@@ -143,6 +155,33 @@ func initializeBosswave() ([]*bw2.BW2Client, error) {
 		clients[i].OverrideAutoChainTo(true)
 	}
 	return clients, nil
+}
+
+func actionDecommission(c *cli.Context) error {
+	// Don't want to shadow global `cfgs` variable (fixme?)
+	var err error
+	cfgs, err = readConfigFromFile(c.String("config"))
+	if err != nil {
+		fmt.Println("Config file error:", err)
+		os.Exit(1)
+	}
+
+	bwClients, err := initializeBosswave()
+	if err != nil {
+		fmt.Println("Failed to connect to Bosswave:", err)
+		os.Exit(1)
+	}
+
+	for i, cfg := range cfgs {
+		service := bwClients[i].RegisterService(cfg.Path, "s.spawnpoint")
+		iface := service.RegisterInterface("server", "i.spawnpoint")
+		// Publishing a message without any POs is effectively a "de-persist"
+		err = iface.PublishSignal("heartbeat")
+		if err != nil {
+			fmt.Printf("Failed to decommission spawnpoint %s: %v\n", cfg.Alias, err)
+		}
+	}
+	return nil
 }
 
 func actionRun(c *cli.Context) error {
