@@ -156,10 +156,12 @@ func (p *Params) MustString(key string) string {
 	rv, ok := p.dat[key]
 	if !ok {
 		fmt.Printf("Missing paramater '%s'\n", key)
+		os.Exit(1)
 	}
 	rvs, ok := rv.(string)
 	if !ok {
 		fmt.Printf("Parameter '%s' should be a string\n", key)
+		os.Exit(1)
 	}
 	return rvs
 }
@@ -168,10 +170,12 @@ func (p *Params) MustInt(key string) int {
 	rv, ok := p.dat[key]
 	if !ok {
 		fmt.Printf("Missing paramater '%s'\n", key)
+		os.Exit(1)
 	}
 	rvi, ok := rv.(int)
 	if !ok {
 		fmt.Printf("Parameter '%s' should be an int\n", key)
+		os.Exit(1)
 	}
 	return rvi
 }
@@ -180,6 +184,7 @@ func (p *Params) MustStringSlice(key string) []string {
 	rv, ok := p.dat[key]
 	if !ok {
 		fmt.Printf("Missing paramater '%s'\n", key)
+		os.Exit(1)
 	}
 	rvi, ok := rv.([]string)
 	if !ok {
@@ -190,11 +195,13 @@ func (p *Params) MustStringSlice(key string) []string {
 					r = append(r, str)
 				} else {
 					fmt.Printf("Parameter '%s' cannot convert all entities to string slice\n", key)
+					os.Exit(1)
 				}
 			}
 			return r
 		} else {
 			fmt.Printf("Parameter '%s' should be a string slice\n", key)
+			os.Exit(1)
 		}
 	}
 	return rvi
