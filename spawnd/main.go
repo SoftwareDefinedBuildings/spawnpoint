@@ -21,8 +21,9 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.4.3`
+const versionNum = `0.5.0`
 const defaultZombiePeriod = 2 * time.Minute
+const persistEnvVar = "SPAWND_PERSIST_DIR"
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -893,28 +894,32 @@ func persistManifests(id int) {
 		runningSvcsLocks[id].Unlock()
 
 		var manifestRaw bytes.Buffer
-		mfstFileName := ".manifests-" + cfgs[id].Alias
+		mfstFileDest := ".manifests-" + cfgs[id].Alias
+		if mfstFileEnv := os.Getenv(persistEnvVar); mfstFileEnv != "" {
+			mfstFileDest = mfstFileEnv + "/" + mfstFileDest
+		}
+
 		encoder := gob.NewEncoder(&manifestRaw)
 		if err := encoder.Encode(manifests); err != nil {
 			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
 				ansi.ColorCode("reset"), err)
-		} else if err := ioutil.WriteFile(mfstFileName, manifestRaw.Bytes(), 0600); err != nil {
+		} else if err := ioutil.WriteFile(mfstFileDest, manifestRaw.Bytes(), 0600); err != nil {
 			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
 				ansi.ColorCode("reset"), err)
 		}
-
 		time.Sleep(persistManifestPeriod * time.Second)
 	}
 }
 
 func recoverPreviousState() {
 	for i := 0; i < len(cfgs); i++ {
-		mfstFileName := ".manifests-" + cfgs[i].Alias
-		mfstBytes, err := ioutil.ReadFile(mfstFileName)
+		mfstFileSrc := ".manifests-" + cfgs[i].Alias
+		if mfstFileEnv := os.Getenv(persistEnvVar); mfstFileEnv != "" {
+			mfstFileSrc = mfstFileEnv + "/" + mfstFileSrc
+		}
+		mfstBytes, err := ioutil.ReadFile(mfstFileSrc)
 		if err != nil {
-			if !os.IsNotExist(err) {
-				fmt.Printf("Error (%s): Failed to read persisted manifests: %v", cfgs[i].Alias, err)
-			}
+			fmt.Printf("Error (%s): Failed to read persisted manifests: %v", cfgs[i].Alias, err)
 			return
 		}
 
