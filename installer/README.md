@@ -32,9 +32,9 @@ This script will then take the following steps:
      * `memAlloc` (`$SPAWND_INSTALLER_MEM_ALLOC`): The total amount of memory to
        allocate for the containers running on this Spawnpoint. Remember, this is
        either in MiB by default or in GiB with a "G" suffix on the string.
-    * `cpuShares` (`$SPAWND_INSTALLER_CPU_SHARES`): The total amount of CPU
-      shares to allocate to containers running on this Spawnopint. Remember,
-      this should be 1024 shares per core.
+     * `cpuShares` (`$SPAWND_INSTALLER_CPU_SHARES`): The total amount of CPU
+       shares to allocate to containers running on this Spawnopint. Remember,
+       this should be 1024 shares per core.
   6. Create an empty placeholder for `/etc/spawnd/metadata.yml` if the file does
      not exist already.
   7. Start up the new `spawnd` service, after enabling it to start on boot as
