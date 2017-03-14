@@ -2,3 +2,4 @@
 *.swp
 spawnd/spawnd
 spawnctl/spawnctl
+.bw2bind.log
