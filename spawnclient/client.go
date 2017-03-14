@@ -57,6 +57,10 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 		return nil, err
 	}
 
+	potentialAlias := baseURI[:strings.Index(baseURI, "/")]
+	aliasedVk, err := sc.ConvertAliasToVK(potentialAlias)
+	baseURIAliased := (err == nil)
+
 	spawnpoints := make(map[string]objects.SpawnPoint)
 	for heartbeatMsg := range heartbeatMsgs {
 		for _, po := range heartbeatMsg.POs {
@@ -68,6 +72,9 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]objects.SpawnPoint, erro
 
 				uri := heartbeatMsg.URI[:len(heartbeatMsg.URI)-
 					len("/s.spawnpoint/server/i.spawnpoint/signal/heartbeat")]
+				if baseURIAliased {
+					uri = strings.Replace(uri, aliasedVk, potentialAlias, 1)
+				}
 				timestamp := time.Unix(0, heartbeat.Time)
 				sp := objects.SpawnPoint{
 					URI:                uri,
@@ -279,14 +286,7 @@ func (sc *SpawnClient) DeployService(rawConfig string, config *objects.SvcConfig
 		return nil, fmt.Errorf("Initial spawnpoint scan failed: %v", err)
 	}
 
-	// Scan returns Spawnpoints indexed by the un-aliased URIs
-	effectiveURI := spURI
-	potentialAlias := spURI[:strings.Index(spURI, "/")]
-	if vk, err := sc.ConvertAliasToVK(potentialAlias); err == nil {
-		effectiveURI = strings.Replace(effectiveURI, potentialAlias, vk, 1)
-	}
-
-	spawnpoint, ok := spawnpoints[effectiveURI]
+	spawnpoint, ok := spawnpoints[spURI]
 	if !ok {
 		return nil, fmt.Errorf("Spawnpoint %s not found", spURI)
 	}
