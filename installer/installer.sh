@@ -1,6 +1,6 @@
 #!/bin/sh
 # This script is based on the Bosswave install script
-# The Bosswave install script was in turn based on the docker install script
+# The Bosswave install script was in turn based on the Docker install script
 # It should be used with
 #   'curl -sSL https://get.bw2.io/spawnd | sh'
 # Or:
@@ -13,6 +13,8 @@ command_exists() {
     command -v "$@" > /dev/null 2>&1
 }
 
+do_install() {
+
 echo "Automated installer for Spawnd $REL"
 
 if [ "$(uname -m)" != "x86_64" ]; then
@@ -23,12 +25,8 @@ if [ "$(uname -s)" != "Linux" ]; then
     echo "Sorry, the Spawnd installer only supports Linux for now"
     exit 1
 fi
-if [ ! -e /etc/issue ]; then
+if [ ! -e /etc/issue ] || [ "$(cut -d' ' -f 1 /etc/issue)" != "Ubuntu" ]; then
     echo "Sorry, the Spawnd installer only supports Ubuntu for now"
-    exit 1
-fi
-if [ "$(cut -d' ' -f 1 /etc/issue)" != "Ubuntu" ]; then
-    echo "Sorry, the Spawnd intaller only supports Ubuntu for now"
     exit 1
 fi
 
@@ -56,7 +54,7 @@ if [ "$(pidof bw2)" = "" ]; then
     exit 1
 fi
 
-sh_c = 'sh -c'
+sh_c='sh -c'
 if [ "$user" != 'root' ]; then
     if command_exists sudo; then
         sh_c='sudo -E sh -c'
@@ -69,11 +67,105 @@ if [ "$user" != 'root' ]; then
     fi
 fi
 
+curl=''
+if command_exists curl; then
+    curl='curl -sSL'
+elif command_exists wget; then
+    curl='wget -qO-'
+fi
+
+$sh_c "mkdir -p /etc/spawnd"
+set +e
+getent passwd spawnd > /dev/null
+if [ $? -ne 0 ]; then
+    ( set -x; $sh_c 'useradd -r -s /usr/sbin/nologin spawnd' )
+fi
+
+id -Gn spawnd | grep '\bdocker\b'
+if [ $? -ne 0 ]; then
+    ( set -x; $sh_c 'usermod -G docker spawnd' )
+fi
+set -e
+
+$sh_c 'chown spawnd:spawnd /etc/spawnd'
+
 echo "Pulling latest spawnd docker container"
 $sh_c "docker pull jhkolb/spawnd:amd64"
 
-$sh_c "mkdir /etc/spawnd"
+set +e
 $sh_c "systemctl stop spawnd"
+set -e
 $sh_c "$curl http://get.bw2.io/spawnd/0.x/Linux/x86_64/$REL/spawnd.service > /etc/systemd/system/spawnd.service"
 $sh_c "systemctl daemon-reload"
-$sh_c "sytemctl enable spawnd"
+$sh_c "systemctl enable spawnd"
+
+if [ ! -e /etc/spawnd/config.yml ]; then
+    $sh_c "cat >/etc/spawnd/config.yml" <<-'EOF'
+	entity: {{entity}}
+	path: {{path}}
+	alias: {{alias}}
+	memAlloc: {{memAlloc}}
+	cpuShares: {{cpuShares}}
+	localRouter: 172.17.0.1:28589
+	containerRouter: 172.17.0.1:28589
+	useHostNet: false
+	EOF
+
+    entity=''
+    path=''
+    memAlloc=''
+    cpuShares=''
+    if [ -n "$SPAWND_INSTALLER_ENTITY" ]; then
+        entity="$SPAWND_INSTALLER_ENTITY"
+    else
+        entity="$(whiptail --nocancel --inputbox "Type the path to the Bosswave Entity for this Spawnpoint." \
+                  10 78 --title "Entity Selection" 3>&1 1>&2 2>&3)"
+        $sh_c "cp $entity /etc/spawnd/"
+    fi
+
+    if [ -n "$SPAWND_INSTALLER_PATH" ]; then
+        path="$SPAWND_INSTALLER_PATH"
+    else
+        path="$(whiptail --nocancel --inputbox "Base URI for this Spawnpoint to advertise on:" \
+                10 78 --title "Base URI Selection" 3>&1 1>&2 2>&3)"
+    fi
+    sdAlias="$(echo "$path" | awk -F'/' '{print $NF}')"
+
+    if [ -n "$SPAWND_INSTALLER_MEM_ALLOC" ]; then
+        memAlloc="$SPAWND_INSTALLER_MEM_ALLOC"
+    else
+        memAlloc="$(whiptail --nocancel --inputbox "Memory allocation for this Spawnpoint:" \
+                    10 78 --title "Memory Allocation" 3>&1 1>&2 2>&3)"
+    fi
+
+    if [ -n "$SPAWND_INSTALLER_CPU_SHARES" ]; then
+        cpuShares="$SPAWND_INSTALLER_CPU_SHARES"
+    else
+        cpuShares="$(whiptail --nocancel --inputbox "CPU Shares for this Spawnpoint (Enter 1024 per Core)" \
+                     10 78 --title "CPU Shares" 3>&1 1>&2 2>&3)"
+    fi
+
+    entityFile="$(echo "$entity" | awk -F'/' '{print $NF}')"
+
+    # / in sed subsitution commands is so mainstream!
+    $sh_c "sed -ie 's#{{entity}}#/etc/spawnd/$entityFile#' /etc/spawnd/config.yml"
+    $sh_c "sed -ie 's#{{path}}#$path#' /etc/spawnd/config.yml"
+    $sh_c "sed -ie 's#{{alias}}#$sdAlias#' /etc/spawnd/config.yml"
+    $sh_c "sed -ie 's#{{memAlloc}}#$memAlloc#' /etc/spawnd/config.yml"
+    $sh_c "sed -ie 's#{{cpuShares}}#$cpuShares#' /etc/spawnd/config.yml"
+    $sh_c "chown spawnd:spawnd /etc/spawnd/config.yml"
+
+    $sh_c "chown spawnd:spawnd /etc/spawnd/$entityFile"
+    $sh_c "chmod 0400 /etc/spawnd/$entityFile"
+
+fi
+
+if [ ! -e /etc/spawnd/metadata.yml ]; then
+    $sh_c "touch /etc/spawnd/metadata.yml"
+    $sh_c "chown spawnd:spawnd /etc/spawnd/metadata.yml"
+fi
+
+$sh_c "systemctl start spawnd"
+}
+
+do_install

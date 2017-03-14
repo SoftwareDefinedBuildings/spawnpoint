@@ -2,11 +2,12 @@
 Description=spawnd
 StartLimitBurst=3
 StartLimitInterval=10m
-After=bw2.service
+After=bw2.service docker.service
 
 [Service]
 Restart=always
 RestartSec=1m
+User=spawnd
 TimeoutStartSec=1m
 ExecStart=/usr/bin/docker run \
     --name %p \
