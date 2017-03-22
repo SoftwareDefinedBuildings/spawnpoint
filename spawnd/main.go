@@ -516,11 +516,7 @@ func handleRestart(id int, msg *bw2.SimpleMessage) {
 	namePo := msg.GetOnePODF(bw2.PODFString)
 	if namePo != nil {
 		svcName := string(namePo.GetContents())
-		fmt.Printf("Received restart request for service %s\n", svcName)
 		runningSvcsLocks[id].Lock()
-		for name := range runningServices[id] {
-			fmt.Println(name)
-		}
 		mfst, ok := runningServices[id][svcName]
 		runningSvcsLocks[id].Unlock()
 
