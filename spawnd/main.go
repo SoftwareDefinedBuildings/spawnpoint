@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -21,9 +23,11 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.0`
+const versionNum = `0.5.1`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
+const logReaderBufSize = 1024
+const logDuration = 2
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -228,6 +232,7 @@ func actionRun(c *cli.Context) error {
 		spInterfaces[i].SubscribeSlot("config", curryHandleConfig(i))
 		spInterfaces[i].SubscribeSlot("restart", curryHandleRestart(i))
 		spInterfaces[i].SubscribeSlot("stop", curryHandleStop(i))
+		spInterfaces[i].SubscribeSlot("logs", curryHandleLogs(i))
 	}
 
 	// Set Spawnpoint metadata
@@ -558,6 +563,85 @@ func curryHandleStop(id int) func(*bw2.SimpleMessage) {
 	return func(msg *bw2.SimpleMessage) {
 		handleStop(id, msg)
 	}
+}
+
+func handleLogs(id int, msg *bw2.SimpleMessage) {
+	requestPo := msg.GetOnePODF(bw2.PODFMsgPack)
+	if requestPo != nil {
+		var request objects.LogsRequest
+		if err := requestPo.(bw2.MsgPackPayloadObject).ValueInto(&request); err != nil {
+			fmt.Println("Failed to unmarshal log request:", err)
+		}
+
+		runningSvcsLocks[id].Lock()
+		_, ok := runningServices[id][request.SvcName]
+		runningSvcsLocks[id].Unlock()
+		if !ok {
+			ologs[id] <- SLM{Service: request.SvcName, Message: "[FAILURE] Service not found"}
+		}
+
+		containerName := fmt.Sprintf("spawnpoint_%s_%s", cfgs[id].Alias, request.SvcName)
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		go GetLogs(writer, containerName, request.StartTime)
+		// This is a hack because the Docker API's log call doesn't return
+		// and doesn't respect contexts either
+		time.AfterFunc(logDuration*time.Second, func() { writer.Close() })
+
+		buffer := make([]string, logReaderBufSize)
+		nextIdx := 0
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			buffer[nextIdx] = scanner.Text()
+			nextIdx++
+
+			if nextIdx == len(buffer) {
+				logResponse := objects.LogsResponse{
+					Nonce:    request.Nonce,
+					Messages: buffer,
+				}
+				if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
+					fmt.Println("Warning -- failed to publish logs response:", err)
+				}
+				nextIdx = 0
+			}
+		}
+		if nextIdx > 0 {
+			logResponse := objects.LogsResponse{
+				Nonce:    request.Nonce,
+				Messages: buffer[:nextIdx],
+			}
+			if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
+				fmt.Println("Warning -- failed to publish logs response:", err)
+			}
+		}
+
+		// Send empty logs response to signal end of messages to client
+		logResponse := objects.LogsResponse{
+			Nonce:    request.Nonce,
+			Messages: []string{},
+		}
+		if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
+			fmt.Println("Warning -- failed to publish final logs response:", err)
+		}
+	}
+}
+
+func curryHandleLogs(id int) func(*bw2.SimpleMessage) {
+	return func(msg *bw2.SimpleMessage) {
+		handleLogs(id, msg)
+	}
+}
+
+func sendLogResponse(response *objects.LogsResponse, ifc *bw2.Interface, signal string) error {
+	logRespPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, response)
+	if err != nil {
+		return fmt.Errorf("Failed to create log response PO: %v", err)
+	}
+	if err = ifc.PublishSignal(signal, logRespPo); err != nil {
+		return fmt.Errorf("Failed to publish logs response: %v", err)
+	}
+	return nil
 }
 
 func manageService(id int, mfst *Manifest) {

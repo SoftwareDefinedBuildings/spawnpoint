@@ -106,3 +106,14 @@ type SpawnpointSvcHb struct {
 	CPUPercent     float64
 	OriginalConfig string
 }
+
+type LogsRequest struct {
+	SvcName   string
+	Nonce     uint64
+	StartTime int64
+}
+
+type LogsResponse struct {
+	Nonce    uint64
+	Messages []string
+}

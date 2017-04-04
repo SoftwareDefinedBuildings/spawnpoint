@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -9,7 +10,7 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 )
 
-const timeoutLen = 3
+const timeoutLen = 5
 
 var dkr *docker.Client
 
@@ -272,4 +273,15 @@ func createNetIfNecessary(netName string) error {
 		Driver: "overlay",
 	})
 	return err
+}
+
+func GetLogs(out io.Writer, container string, since int64) error {
+	return dkr.Logs(docker.LogsOptions{
+		Container:    container,
+		OutputStream: out,
+		ErrorStream:  out,
+		Since:        since,
+		Stdout:       true,
+		Stderr:       true,
+	})
 }

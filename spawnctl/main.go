@@ -188,6 +188,27 @@ func main() {
 				},
 			},
 		},
+		{
+			Name:   "logs",
+			Usage:  "Retrieve the logs for a spawned service",
+			Action: actionLogs,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri, u",
+					Usage:  "base URI of the spawnpoint running the service",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "name of the service to retrieve logs for",
+				},
+				cli.DurationFlag{
+					Name:  "since, s",
+					Usage: "starting time for the log as an offset back from now",
+				},
+			},
+		},
 	}
 	app.Run(os.Args)
 }
@@ -634,6 +655,46 @@ func actionDeployLast(c *cli.Context) {
 		ctxt.Set("name", prevDep.Name)
 		actionDeploy(ctxt)
 	}
+}
+
+func actionLogs(c *cli.Context) error {
+	entity := c.GlobalString("entity")
+	if entity == "" {
+		fmt.Println("Missing 'entity' parameter")
+		os.Exit(1)
+	}
+	uri := c.String("uri")
+	if uri == "" {
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
+	}
+	svcname := c.String("name")
+	if svcname == "" {
+		fmt.Println("Missing 'name' parameter")
+		os.Exit(1)
+	}
+	since := c.Duration("since")
+	if since == 0 {
+		fmt.Println("Missing 'since' parameter")
+		os.Exit(1)
+	}
+
+	sc, err := spawnclient.New(c.GlobalString("router"), entity)
+	if err != nil {
+		fmt.Println("Failed to connect to spawnpoint:", err)
+		os.Exit(1)
+	}
+
+	msgChan, err := sc.GetLogs(uri, svcname, since)
+	if err != nil {
+		fmt.Println("Failed to retrieve logs:", err)
+		os.Exit(1)
+	}
+
+	for msg := range msgChan {
+		fmt.Println(msg)
+	}
+	return nil
 }
 
 func indentText(s string, indentLevel int) string {

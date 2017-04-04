@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -339,4 +340,77 @@ func (sc *SpawnClient) ConvertAliasToVK(alias string) (string, error) {
 		return "", err
 	}
 	return base64.URLEncoding.EncodeToString(rawData), nil
+}
+
+func (sc *SpawnClient) GetLogs(uri string, svcname string, since time.Duration) (chan string, error) {
+	spawnpoints, err := sc.Scan(uri)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to scan for spawnpoint: %v", err)
+	}
+	spawnpoint, ok := spawnpoints[uri]
+	if !ok {
+		return nil, fmt.Errorf("No spawnpoint found at %s", uri)
+	} else if !spawnpoint.Good() {
+		return nil, fmt.Errorf("Spawnpoint at %s appears to be down", uri)
+	}
+
+	svcs, _, err := sc.Inspect(uri)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to inspect spawnpoint: %v", err)
+	}
+	foundService := false
+	for _, svc := range svcs {
+		if svc.Name == svcname {
+			foundService = true
+		}
+	}
+	if !foundService {
+		return nil, fmt.Errorf("Service %s is not running on target spawnpoint", svcname)
+	}
+
+	// Create a nonce so we can demultiplex results sent back from spawnd
+	rand.Seed(time.Now().UnixNano())
+	nonce := rand.Uint64()
+	startTime := time.Now().Add(-since).Unix()
+
+	_, ifcClient := sc.newIfcClient(uri)
+	retChan := make(chan string, 100)
+	err = ifcClient.SubscribeSignal("logs/"+svcname, func(msg *bw2.SimpleMessage) {
+		responsePo := msg.GetOnePODF(bw2.PODFMsgPack)
+		if responsePo == nil {
+			return
+		}
+		var response objects.LogsResponse
+		if err = responsePo.(bw2.MsgPackPayloadObject).ValueInto(&response); err != nil {
+			return
+		}
+
+		if response.Nonce == nonce {
+			if len(response.Messages) == 0 {
+				close(retChan)
+			} else {
+				for _, logMsg := range response.Messages {
+					retChan <- logMsg
+				}
+			}
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to subscribe to receive log messages: %v", err)
+	}
+
+	logReq := objects.LogsRequest{
+		SvcName:   svcname,
+		Nonce:     nonce,
+		StartTime: startTime,
+	}
+	requestPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, logReq)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to marshal request: %v", err)
+	}
+	if err = ifcClient.PublishSlot("logs", requestPo); err != nil {
+		return nil, fmt.Errorf("Failed to publish to spawnpoint: %v", err)
+	}
+
+	return retChan, nil
 }
