@@ -967,7 +967,10 @@ func persistManifests(id int) {
 				AutoRestart:    mfstPtr.AutoRestart,
 				RestartInt:     mfstPtr.RestartInt,
 				Volumes:        mfstPtr.Volumes,
+				OverlayNet:     mfstPtr.OverlayNet,
+				UseHostNet:     mfstPtr.UseHostNet,
 				OriginalConfig: mfstPtr.OriginalConfig,
+				ZombiePeriod:   mfstPtr.ZombiePeriod,
 			}
 			i++
 		}
