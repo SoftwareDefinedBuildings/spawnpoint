@@ -23,12 +23,16 @@ message publication from the rate of watchdog kicks.
     corresponding watchdog to kick, separated by a colon (`:`). For example:
     `scratch.ns/spawnpoint/alpha:spawnpoint.alpha`
 
+Note that `bw2mon` also requires a Watchdog token. See the
+[watchdog documentation](https://github.com/immesys/wd) for instructions on how
+to specify this.
+
 ## Spawnpoint Specifics
 Spawnpoint heartbeat messages are published on:
 `<base_uri>/s.spawnpoint/server/i.spawnpoint/signal/heartbeat`
 
 Spawnpoint service heartbeats are published on:
-`<base_uri>/s.spawnpoint/server/i.spawnpoint/signal/heartbeat/<svc_name>``
+`<base_uri>/s.spawnpoint/server/i.spawnpoint/signal/heartbeat/<svc_name>`
 
 ## Example
 ```
