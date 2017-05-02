@@ -91,7 +91,10 @@ func runApp(c *cli.Context) error {
 			}
 
 			for _ = range pubCh {
-				wd.RLKick(c.Duration("interval"), wdName, wdTimeout)
+				kicked := wd.RLKick(c.Duration("interval"), wdName, wdTimeout)
+				if kicked {
+					fmt.Printf("Received message on URI %s, kicking watchdog %s\n", uri, wdName)
+				}
 			}
 		}()
 	}
