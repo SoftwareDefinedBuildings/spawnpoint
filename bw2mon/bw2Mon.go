@@ -51,11 +51,16 @@ func runApp(c *cli.Context) error {
 		fmt.Println("Missing --entity argument")
 		os.Exit(1)
 	}
-	wdTimeout := int(2 * c.Duration("interval"))
+	wdTimeout := 2 * int(c.Duration("interval")/time.Second)
 
-	uris := make([]string, len(c.StringSlice("endpoint")))
-	wdNames := make([]string, len(c.StringSlice("endpoint")))
-	for i, endpoint := range c.StringSlice("endpoint") {
+	endpoints := c.StringSlice("endpoint")
+	if len(endpoints) == 0 {
+		fmt.Println("Missing --endpoint argument")
+		os.Exit(1)
+	}
+	uris := make([]string, len(endpoints))
+	wdNames := make([]string, len(endpoints))
+	for i, endpoint := range endpoints {
 		tokens := strings.SplitN(endpoint, ":", 2)
 		if len(tokens) != 2 {
 			fmt.Println("Invalid endpoint:", endpoint)
@@ -71,20 +76,22 @@ func runApp(c *cli.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(len(uris))
 	for i := 0; i < len(uris); i++ {
+		uri := uris[i]
+		wdName := wdNames[i]
 		go func() {
 			defer wg.Done()
 
 			pubCh, err := bwClient.Subscribe(&bw2.SubscribeParams{
 				AutoChain: true,
-				URI:       uris[i],
+				URI:       uri,
 			})
 			if err != nil {
-				fmt.Println("Failed to subscribe to URI:", uris[i])
+				fmt.Printf("Failed to subscribe to URI '%s': %v", uri, err)
 				return
 			}
+
 			for _ = range pubCh {
-				wd.Kick(wdNames[i], wdTimeout)
-				time.Sleep(c.Duration("interval"))
+				wd.RLKick(c.Duration("interval"), wdName, wdTimeout)
 			}
 		}()
 	}
