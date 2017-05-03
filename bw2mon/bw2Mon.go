@@ -23,6 +23,10 @@ func main() {
 			EnvVar: "BW2_DEFAULT_ENTITY",
 		},
 		cli.StringFlag{
+			Name:   "agent",
+			EnvVar: "BW2_AGENT",
+		},
+		cli.StringFlag{
 			Name: "prefix",
 		},
 		cli.StringSliceFlag{
@@ -70,7 +74,7 @@ func runApp(c *cli.Context) error {
 		wdNames[i] = prefix + tokens[1]
 	}
 
-	bwClient := bw2.ConnectOrExit("")
+	bwClient := bw2.ConnectOrExit(c.String("agent"))
 	bwClient.SetEntityFileOrExit(c.String("entity"))
 
 	var wg sync.WaitGroup
