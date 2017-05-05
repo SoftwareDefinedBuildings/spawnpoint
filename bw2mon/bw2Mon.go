@@ -78,19 +78,31 @@ func runApp(c *cli.Context) error {
 	for i := 0; i < len(uris); i++ {
 		uri := uris[i]
 		wdName := wdNames[i]
-		go func() {
-			defer wg.Done()
+		ch := make(chan int, 1)
 
+		go func() {
 			pubCh, err := bwClient.Subscribe(&bw2.SubscribeParams{
 				AutoChain: true,
 				URI:       uri,
 			})
 			if err != nil {
 				fmt.Printf("Failed to subscribe to URI '%s': %v", uri, err)
-				return
+				os.Exit(1)
 			}
 
 			for _ = range pubCh {
+				select {
+				case ch <- 0:
+				default:
+				}
+			}
+
+			close(ch)
+			wg.Done()
+		}()
+
+		go func() {
+			for _ = range ch {
 				kicked := wd.RLKick(c.Duration("interval"), wdName, wdTimeout)
 				if kicked {
 					fmt.Printf("Received message on URI %s, kicking watchdog %s\n", uri, wdName)
@@ -98,6 +110,7 @@ func runApp(c *cli.Context) error {
 			}
 		}()
 	}
+
 	wg.Wait()
 	return nil
 }
