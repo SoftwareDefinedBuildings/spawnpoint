@@ -23,7 +23,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.2`
+const versionNum = `0.5.3`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
 const logReaderBufSize = 1024
