@@ -523,9 +523,13 @@ func handleRestart(id int, msg *bw2.SimpleMessage) {
 		svcName := string(namePo.GetContents())
 		runningSvcsLocks[id].Lock()
 		mfst, ok := runningServices[id][svcName]
+		var container *SpawnPointContainer
+		if ok {
+			container = mfst.Container
+		}
 		runningSvcsLocks[id].Unlock()
 
-		if ok && mfst.Container != nil {
+		if ok && container != nil {
 			// Restart a running service
 			*mfst.eventChan <- restart
 		} else if ok {
@@ -714,7 +718,9 @@ func manageService(id int, mfst *Manifest) {
 				runningSvcsLocks[id].Unlock()
 				return
 			}
+			runningSvcsLocks[id].Lock()
 			mfst.Container = container
+			runningSvcsLocks[id].Unlock()
 			msg := "[SUCCESS] Container (re)start successful"
 			ologs[id] <- SLM{mfst.ServiceName, msg}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
@@ -745,7 +751,9 @@ func manageService(id int, mfst *Manifest) {
 				availLocks[id].Unlock()
 				return
 			}
+			runningSvcsLocks[id].Lock()
 			mfst.Container = container
+			runningSvcsLocks[id].Unlock()
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
@@ -766,7 +774,9 @@ func manageService(id int, mfst *Manifest) {
 				availLocks[id].Unlock()
 				return
 			}
+			runningSvcsLocks[id].Lock()
 			mfst.Container = container
+			runningSvcsLocks[id].Unlock()
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container auto-restart successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
@@ -806,7 +816,9 @@ func manageService(id int, mfst *Manifest) {
 				availLocks[id].Unlock()
 				return
 			}
+			runningSvcsLocks[id].Lock()
 			mfst.Container = container
+			runningSvcsLocks[id].Unlock()
 			msg := "[SUCCESS] Container (re)start successful"
 			ologs[id] <- SLM{mfst.ServiceName, msg}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
@@ -844,7 +856,9 @@ func manageService(id int, mfst *Manifest) {
 				if mfst.stopping {
 					mfst.stopping = false
 				}
+				runningSvcsLocks[id].Lock()
 				mfst.Container = nil
+				runningSvcsLocks[id].Unlock()
 				availLocks[id].Lock()
 				availableCPUShares[id] += int64(mfst.CPUShares)
 				availableMem[id] += int64(mfst.MemAlloc)
@@ -950,10 +964,10 @@ func depersistSvcHb(id int, svcname string) {
 
 func persistManifests(id int) {
 	for {
+		runningSvcsLocks[id].Lock()
 		manifests := make([]Manifest, len(runningServices[id]))
 		i := 0
 
-		runningSvcsLocks[id].Lock()
 		for _, mfstPtr := range runningServices[id] {
 			// Make a deep copy
 			manifests[i] = Manifest{
