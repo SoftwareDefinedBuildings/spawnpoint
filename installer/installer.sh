@@ -87,7 +87,7 @@ if [ $? -ne 0 ]; then
 fi
 set -e
 
-$sh_c 'chown spawnd:spawnd /etc/spawnd'
+$sh_c 'chown -R spawnd:spawnd /etc/spawnd'
 
 echo "Pulling latest spawnd docker container"
 $sh_c "docker pull jhkolb/spawnd:amd64"
@@ -108,7 +108,7 @@ if [ ! -e /etc/spawnd/config.yml ]; then
 	cpuShares: {{cpuShares}}
 	localRouter: 172.17.0.1:28589
 	containerRouter: 172.17.0.1:28589
-	useHostNet: false
+	allowHostNet: false
 	EOF
 
     entity=''
@@ -134,7 +134,7 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     if [ -n "$SPAWND_INSTALLER_MEM_ALLOC" ]; then
         memAlloc="$SPAWND_INSTALLER_MEM_ALLOC"
     else
-        memAlloc="$(whiptail --nocancel --inputbox "Memory allocation for this Spawnpoint:" \
+        memAlloc="$(whiptail --nocancel --inputbox "Memory allocation for this Spawnpoint (e.g. 300M, 2G):" \
                     10 78 --title "Memory Allocation" 3>&1 1>&2 2>&3)"
     fi
 
