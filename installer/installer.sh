@@ -17,6 +17,26 @@ do_install() {
 
 echo "Automated installer for Spawnd $REL"
 
+sh_c='sh -c'
+if [ "$user" != 'root' ]; then
+    if command_exists sudo; then
+        sh_c='sudo -E sh -c'
+    elif command_exists su; then
+        sh_c='su -c'
+    else
+        echo "Error: this installer needs the ability to run commands as root"
+        echo "We are unable to find either sudo or su available to make this happen."
+        exit 1
+    fi
+fi
+
+curl=''
+if command_exists curl; then
+    curl='curl -sSL'
+elif command_exists wget; then
+    curl='wget -qO-'
+fi
+
 if [ "$(uname -m)" != "x86_64" ]; then
     echo "Sorry, the Spawnd installer only supports x86_64 for now"
     exit 1
@@ -39,7 +59,7 @@ if ! command_exists docker; then
     echo "Unmet spawnd requirement: docker"
     exit 1
 fi
-docker ps > /dev/null 2>&1
+$sh_c docker ps > /dev/null 2>&1
 if [ $? != 0 ]; then
     echo "Error: Docker appears to be installed but is not running"
     exit 1
@@ -52,26 +72,6 @@ fi
 if [ "$(pidof bw2)" = "" ]; then
     echo "Error: bw2 appears to be installed but is not running"
     exit 1
-fi
-
-sh_c='sh -c'
-if [ "$user" != 'root' ]; then
-    if command_exists sudo; then
-        sh_c='sudo -E sh -c'
-    elif command_exists su; then
-        sh_c='su -c'
-    else
-        echo "Error: this installer needs the ability to run commands as root"
-        echo "We are unable to find either sudo or su available to make this happen."
-        exit 1
-    fi
-fi
-
-curl=''
-if command_exists curl; then
-    curl='curl -sSL'
-elif command_exists wget; then
-    curl='wget -qO-'
 fi
 
 $sh_c "mkdir -p /etc/spawnd"
