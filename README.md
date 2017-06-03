@@ -212,9 +212,6 @@ The valid parameters currently are:
   the specified repository before service instantiation. Defaults to
   "jhkolb/spawnpoint:amd64".
 
-* `aptRequires` (optional): A sequence of names of Ubuntu packages to install as
-  part of the container build process.
-
 * `source` (optional): A GitHub URI pointing to a repository to be checked out before
   starting the container. Must be HTTPS.
 
