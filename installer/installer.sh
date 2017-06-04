@@ -148,11 +148,11 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     entityFile="$(echo "$entity" | awk -F'/' '{print $NF}')"
 
     # / in sed subsitution commands is so mainstream!
-    $sh_c "sed -ie 's#{{entity}}#/etc/spawnd/$entityFile#' /etc/spawnd/config.yml"
-    $sh_c "sed -ie 's#{{path}}#$path#' /etc/spawnd/config.yml"
-    $sh_c "sed -ie 's#{{alias}}#$sdAlias#' /etc/spawnd/config.yml"
-    $sh_c "sed -ie 's#{{memAlloc}}#$memAlloc#' /etc/spawnd/config.yml"
-    $sh_c "sed -ie 's#{{cpuShares}}#$cpuShares#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{entity}}#/etc/spawnd/$entityFile#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{path}}#$path#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{alias}}#$sdAlias#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{memAlloc}}#$memAlloc#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{cpuShares}}#$cpuShares#' /etc/spawnd/config.yml"
     $sh_c "chown spawnd:spawnd /etc/spawnd/config.yml"
 
     $sh_c "chown spawnd:spawnd /etc/spawnd/$entityFile"
