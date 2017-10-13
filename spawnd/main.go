@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SoftwareDefinedBuildings/spawnpoint/objects"
 	"github.com/codegangsta/cli"
-	"github.com/immesys/spawnpoint/objects"
 	"github.com/mgutz/ansi"
 	"github.com/op/go-logging"
 	"github.com/pkg/errors"
@@ -538,6 +538,7 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 		eventChan:      &evCh,
 		OriginalConfig: origCfg,
 		ZombiePeriod:   zombiePeriod,
+		Devices:        trueCfg.Devices,
 	}
 	go manageService(id, &mf)
 	evCh <- boot

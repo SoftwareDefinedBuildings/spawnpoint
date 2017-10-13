@@ -127,6 +127,18 @@ func RestartContainer(alias string, cfg *Manifest, bwRouter string, rebuildImg b
 		}
 	}
 
+	// Map any specified devices into container
+	var containerDevices []docker.Device
+	if len(cfg.Devices) > 0 {
+		containerDevices = make([]docker.Device, len(cfg.Devices))
+		for i, device := range cfg.Devices {
+			containerDevices[i] = docker.Device{
+				PathOnHost:      device,
+				PathInContainer: device,
+			}
+		}
+	}
+
 	cnt, err := dkr.CreateContainer(docker.CreateContainerOptions{
 		Name: fmt.Sprintf("spawnpoint_%s_%s", alias, cfg.ServiceName),
 		Config: &docker.Config{
@@ -144,6 +156,7 @@ func RestartContainer(alias string, cfg *Manifest, bwRouter string, rebuildImg b
 			NetworkMode: netMode,
 			Memory:      int64(cfg.MemAlloc) * 1024 * 1024,
 			CPUShares:   int64(cfg.CPUShares),
+			Devices:     containerDevices,
 		},
 	})
 	if err != nil {

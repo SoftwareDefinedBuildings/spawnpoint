@@ -36,6 +36,7 @@ type SvcConfig struct {
 	OverlayNet    string   `yaml:"overlayNet,omitempty"`
 	UseHostNet    bool     `yaml:"useHostNet"`
 	ZombiePeriod  string   `yaml:"zombiePeriod,omitempty"`
+	Devices       []string `yaml:"devices,omitempty"`
 }
 
 type SpawnPoint struct {

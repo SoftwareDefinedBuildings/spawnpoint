@@ -22,4 +22,5 @@ type Manifest struct {
 	stopping       bool
 	OriginalConfig string
 	ZombiePeriod   time.Duration
+	Devices        []string
 }
