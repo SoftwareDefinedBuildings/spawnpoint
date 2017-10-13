@@ -21,7 +21,7 @@ This script will then take the following steps:
   3. Pull the latest Spawnpoint daemon container, `jhkolb/spawnd:amd64` from
      Docker's repository.
   4. Install a `systemd` unit file to manage execution of the `spawnd` container.
-  5. Automatically populates the configuration file in `/etc/spawnd/config.yml`
+  5. Automatically populate the configuration file in `/etc/spawnd/config.yml`
      By default, this is done through interactive prompts, but each of these
      parameters may also be defined through environment variables if a
      non-interactive installation is required.
