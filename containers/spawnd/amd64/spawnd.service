@@ -1,7 +1,5 @@
 [Unit]
 Description=spawnd
-StartLimitBurst=3
-StartLimitInterval=10m
 After=bw2.service docker.service
 
 [Service]
