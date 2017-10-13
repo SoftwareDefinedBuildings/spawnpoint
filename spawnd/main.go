@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/gob"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,17 +16,24 @@ import (
 	"github.com/codegangsta/cli"
 	"github.com/immesys/spawnpoint/objects"
 	"github.com/mgutz/ansi"
+	"github.com/op/go-logging"
+	"github.com/pkg/errors"
 
 	docker "github.com/fsouza/go-dockerclient"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.3`
+const versionNum = `0.5.4`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
 const logReaderBufSize = 1024
 const logDuration = 2
+
+var (
+	globalLog *logging.Logger
+	logs      []*logging.Logger
+)
 
 var bwClients []*bw2.BW2Client
 var cfgs []DaemonConfig
@@ -136,7 +142,7 @@ func readMetadataFromFile(fileName string) ([]map[string]string, error) {
 	metadata := make([]map[string]string, len(chunks))
 	for i, chunk := range chunks {
 		if err = yaml.Unmarshal([]byte(chunk), &(metadata[i])); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Failed to parse config YAML")
 		}
 	}
 	return metadata, nil
@@ -149,12 +155,12 @@ func initializeBosswave() ([]*bw2.BW2Client, error) {
 		bw2.SilenceLog()
 		clients[i], err = bw2.Connect(cfg.LocalRouter)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Failed to connect to BW2 router")
 		}
 
 		_, err = clients[i].SetEntityFile(cfg.Entity)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Failed to set BW2 entity")
 		}
 
 		clients[i].OverrideAutoChainTo(true)
@@ -162,42 +168,63 @@ func initializeBosswave() ([]*bw2.BW2Client, error) {
 	return clients, nil
 }
 
+func initGlobalLogger() *logging.Logger {
+	format := "%{color}%{level} %{time:Jan 02 15:04:05} %{shortfunc} %{color:reset}▶ %{message}"
+	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	logBackendLeveled := logging.AddModuleLevel(backend)
+	logging.SetBackend(logBackendLeveled)
+	logging.SetFormatter(logging.MustStringFormatter(format))
+	return logging.MustGetLogger("spawnd")
+}
+
+func initLoggers(cfgs *[]DaemonConfig) []*logging.Logger {
+	logs = make([]*logging.Logger, len(*cfgs))
+	for i, cfg := range *cfgs {
+		format := "%{color}%{level} %{time:Jan 02 15:04:05} " + cfg.Alias +
+			"(%{shortfunc}) %{color:reset}▶  %{message}"
+		logging.SetFormatter(logging.MustStringFormatter(format))
+		logs[i] = logging.MustGetLogger(("spawnd"))
+	}
+	return logs
+}
+
 func actionDecommission(c *cli.Context) error {
+	globalLog = initGlobalLogger()
+
 	// Don't want to shadow global `cfgs` variable (fixme?)
 	var err error
 	cfgs, err = readConfigFromFile(c.String("config"))
 	if err != nil {
-		fmt.Println("Config file error:", err)
-		os.Exit(1)
+		globalLog.Fatalf("Failed to read config file: %s", err)
 	}
+	logs = initLoggers(&cfgs)
 
-	bwClients, err := initializeBosswave()
+	bwClients, err = initializeBosswave()
 	if err != nil {
-		fmt.Println("Failed to connect to Bosswave:", err)
-		os.Exit(1)
+		globalLog.Fatalf("Failed to connect to Bosswave: %s", err)
 	}
-
 	for i, cfg := range cfgs {
 		service := bwClients[i].RegisterService(cfg.Path, "s.spawnpoint")
 		iface := service.RegisterInterface("server", "i.spawnpoint")
 		// Publishing a message without any POs is effectively a "de-persist"
 		err = iface.PublishSignal("heartbeat")
 		if err != nil {
-			fmt.Printf("Failed to decommission spawnpoint %s: %v\n", cfg.Alias, err)
+			logs[i].Fatalf("Failed to decommission spawnpoint %s: %v", cfg.Alias, err)
 		}
 	}
 	return nil
 }
 
 func actionRun(c *cli.Context) error {
+	globalLog = initGlobalLogger()
 	runningServices = make([](map[string]*Manifest), len(cfgs))
 
 	var err error
 	cfgs, err = readConfigFromFile(c.String("config"))
 	if err != nil {
-		fmt.Println("Config file error", err)
-		os.Exit(1)
+		globalLog.Fatalf("Failed to read configuration file: %s", err)
 	}
+	logs = initLoggers(&cfgs)
 
 	totalCPUShares = make([]uint64, len(cfgs))
 	availableCPUShares = make([]int64, len(cfgs))
@@ -210,16 +237,14 @@ func actionRun(c *cli.Context) error {
 		availableCPUShares[i] = int64(cfg.CPUShares)
 		totalMem[i], err = objects.ParseMemAlloc(cfg.MemAlloc)
 		if err != nil {
-			fmt.Println("Invalid Spawnpoint memory allocation: " + cfg.MemAlloc)
-			os.Exit(1)
+			logs[i].Fatalf("Invalid memory allocation setting: %s", cfg.MemAlloc)
 		}
 		availableMem[i] = int64(totalMem[i])
 	}
 
 	bwClients, err = initializeBosswave()
 	if err != nil {
-		fmt.Println("Failed to initialize Bosswave router:", err)
-		os.Exit(1)
+		globalLog.Fatalf("Failed to initialize Bosswave router: %s", err)
 	}
 
 	// Register spawnpoint service and interfaces
@@ -240,8 +265,7 @@ func actionRun(c *cli.Context) error {
 		var metadata [](map[string]string)
 		metadata, err = readMetadataFromFile(c.String("metadata"))
 		if err != nil {
-			fmt.Println("Invalid metadata file:", err)
-			os.Exit(1)
+			globalLog.Fatalf("Invalid metadata file: %s", err)
 		}
 		for i, spService := range spServices {
 			md := metadata[i]
@@ -260,8 +284,7 @@ func actionRun(c *cli.Context) error {
 	// Start docker connection
 	dockerEventCh, err := ConnectDocker()
 	if err != nil {
-		fmt.Println("Failed to connect to Docker:", err)
-		os.Exit(1)
+		globalLog.Fatalf("Failed to connect to Docker daemon: %s", err)
 	}
 	go monitorDockerEvents(&dockerEventCh)
 
@@ -278,7 +301,7 @@ func actionRun(c *cli.Context) error {
 	}
 	recoverPreviousState()
 
-	fmt.Printf("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
+	globalLog.Infof("Spawnpoint Daemon - Version %s%s%s\n", ansi.ColorCode("cyan+b"),
 		versionNum, ansi.ColorCode("reset"))
 	for i := 0; i < len(cfgs); i++ {
 		go heartbeat(i)
@@ -295,8 +318,6 @@ func publishMessages(id int) error {
 	// Publish outgoing log messages
 	alias := (cfgs)[id].Alias
 	for msg := range ologs[id] {
-		fmt.Printf("%s%s (%s)::%s %s\n", ansi.ColorCode("blue+b"), msg.Service, alias,
-			ansi.ColorCode("reset"), msg.Message)
 		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, objects.SPLogMsg{
 			Time:     time.Now().UnixNano(),
 			SPAlias:  alias,
@@ -304,14 +325,12 @@ func publishMessages(id int) error {
 			Contents: msg.Message,
 		})
 		if err != nil {
-			msg := fmt.Sprintf("(%s) Failed to construct log message: %v", alias, err)
-			fmt.Println(msg)
-			return errors.New(msg)
+			logs[id].Errorf("Failed to serialize log message: %s", err)
+			continue
 		}
 
 		if err := spInterfaces[id].PublishSignal("log", po); err != nil {
-			fmt.Printf("%s[WARN]%s Failed to publish log message: %v\n", ansi.ColorCode("yellow+b"),
-				ansi.ColorCode("reset"), err)
+			logs[id].Errorf("Failed to publish log message: %s", err)
 		}
 	}
 
@@ -327,8 +346,7 @@ func heartbeat(id int) {
 		shares := availableCPUShares[id]
 		availLocks[id].Unlock()
 
-		fmt.Printf("%s(%s)%s Memory (MiB): %v, CPU Shares: %v\n", ansi.ColorCode("blue+b"),
-			alias, ansi.ColorCode("reset"), mem, shares)
+		logs[id].Infof("Memory (MiB): %v, CPU Shares: %v\n", mem, shares)
 		msg := objects.SpawnPointHb{
 			Alias:              alias,
 			Time:               time.Now().UnixNano(),
@@ -343,9 +361,17 @@ func heartbeat(id int) {
 		}
 
 		if err = spInterfaces[id].PublishSignal("heartbeat", hbPo); err != nil {
-			fmt.Printf("%s[WARN]%s Failed to publish log message: %v\n", ansi.ColorCode("yellow+b"),
-				ansi.ColorCode("reset"), err)
+			logs[id].Errorf("Failed to publish heartbeat message: %s", err)
 		}
+
+		runningSvcsLocks[id].Lock()
+		for _, manifest := range runningServices[id] {
+			if manifest.Container != nil {
+				logs[id].Debugf("Running service %s, Mem: %v MiB, CPU: %v Shares",
+					manifest.ServiceName, manifest.MemAlloc, manifest.CPUShares)
+			}
+		}
+		runningSvcsLocks[id].Unlock()
 		time.Sleep(heartbeatPeriod * time.Second)
 	}
 }
@@ -353,11 +379,14 @@ func heartbeat(id int) {
 func monitorDockerEvents(ec *chan *docker.APIEvents) {
 	for event := range *ec {
 		if event.Action == "die" {
+			globalLog.Debugf("Docker container has died: %s", event.Actor.ID)
 		outer:
 			for i := 0; i < len(cfgs); i++ {
 				runningSvcsLocks[i].Lock()
 				for _, manifest := range runningServices[i] {
 					if manifest.Container != nil && manifest.Container.Raw.ID == event.Actor.ID {
+						logs[i].Debugf("Dead Docker container ID %s matches service %s, issuing die event",
+							event.Actor.ID, manifest.ServiceName)
 						*manifest.eventChan <- die
 						runningSvcsLocks[i].Unlock()
 						break outer
@@ -380,7 +409,7 @@ func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]
 			buildcontents[next] = "RUN git clone " + sourceparts[1] + " /srv/spawnpoint"
 			next++
 		default:
-			err := errors.New("Unknown source type")
+			err := fmt.Errorf("Unknown source type: %s", sourceparts[0])
 			return nil, err
 		}
 	} else {
@@ -407,6 +436,7 @@ func constructBuildContents(config *objects.SvcConfig, includeTarEnc string) ([]
 }
 
 func handleConfig(id int, msg *bw2.SimpleMessage) {
+	logs[id].Debug("Received new service configuration")
 	var trueCfg *objects.SvcConfig
 
 	defer func() {
@@ -418,7 +448,9 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 			} else {
 				tag = "meta"
 			}
-			ologs[id] <- SLM{Service: tag, Message: fmt.Sprintf("[FAILURE] Unable to launch service: %+v", r)}
+
+			logs[id].Errorf("failed to launch new service (%s) %s", tag, r)
+			ologs[id] <- SLM{Service: tag, Message: fmt.Sprintf("[FAILURE] Unable to launch service: %v", r)}
 		}
 	}()
 
@@ -431,7 +463,7 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 	}
 	trueCfg = &objects.SvcConfig{}
 	if err := trueCfgPo.ValueInto(&trueCfg); err != nil {
-		panic(err)
+		panic(errors.Wrap(err, "Failed to unmarshal config"))
 	}
 	if !msg.POs[1].IsTypeDF(bw2.PODFString) {
 		panic("Malformed service config in deployment message")
@@ -444,12 +476,12 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 	rawMem := trueCfg.MemAlloc
 	memAlloc, err := objects.ParseMemAlloc(rawMem)
 	if err != nil {
-		panic(err)
+		panic(errors.Wrap(err, "Failed to parse service memory allocation"))
 	}
 
 	econtents, err := base64.StdEncoding.DecodeString(trueCfg.Entity)
 	if err != nil {
-		panic(err)
+		panic(errors.Wrap(err, "Failed to decode entity base64 string"))
 	}
 
 	var fileIncludeEnc string
@@ -461,13 +493,13 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 	}
 	buildcontents, err := constructBuildContents(trueCfg, fileIncludeEnc)
 	if err != nil {
-		panic(err)
+		panic(errors.Wrap(err, "Failed to generate build file contents"))
 	}
 	var restartWaitDur time.Duration
 	if trueCfg.RestartInt != "" {
 		restartWaitDur, err = time.ParseDuration(trueCfg.RestartInt)
 		if err != nil {
-			panic(err)
+			panic(errors.Wrap(err, "Failed to parse restart interval duration"))
 		}
 	}
 
@@ -475,7 +507,7 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 	if trueCfg.ZombiePeriod != "" {
 		zombiePeriod, err = time.ParseDuration(trueCfg.ZombiePeriod)
 		if err != nil {
-			panic(err)
+			panic(errors.Wrap(err, "Failed to parse zombie interval duration"))
 		}
 	} else {
 		zombiePeriod = defaultZombiePeriod
@@ -521,6 +553,7 @@ func handleRestart(id int, msg *bw2.SimpleMessage) {
 	namePo := msg.GetOnePODF(bw2.PODFString)
 	if namePo != nil {
 		svcName := string(namePo.GetContents())
+		logs[id].Debugf("Received restart command for service %s", svcName)
 		runningSvcsLocks[id].Lock()
 		mfst, ok := runningServices[id][svcName]
 		var container *SpawnPointContainer
@@ -531,11 +564,14 @@ func handleRestart(id int, msg *bw2.SimpleMessage) {
 
 		if ok && container != nil {
 			// Restart a running service
+			logs[id].Debugf("Service %s already running, restarting", svcName)
 			*mfst.eventChan <- restart
 		} else if ok {
 			// Restart a zombie service
+			logs[id].Debugf("Service %s is in zombie state, restarting", svcName)
 			*mfst.eventChan <- resurrect
 		} else {
+			logs[id].Debugf("Service %s not found, not restarting", svcName)
 			ologs[id] <- SLM{Service: svcName, Message: "[FAILURE] Service not found"}
 		}
 	}
@@ -551,13 +587,16 @@ func handleStop(id int, msg *bw2.SimpleMessage) {
 	namePo := msg.GetOnePODF(bw2.PODFString)
 	if namePo != nil {
 		svcName := string(namePo.GetContents())
+		logs[id].Debugf("Received command to stop service %s", svcName)
 		runningSvcsLocks[id].Lock()
 		mfst, ok := runningServices[id][svcName]
 		runningSvcsLocks[id].Unlock()
 
 		if ok {
+			logs[id].Debugf("Service %s currently running, issuing stop event", svcName)
 			*mfst.eventChan <- stop
 		} else {
+			logs[id].Debugf("Service %s not found, not stopping", svcName)
 			ologs[id] <- SLM{Service: svcName, Message: "[FAILURE] Service not found"}
 		}
 	}
@@ -574,13 +613,15 @@ func handleLogs(id int, msg *bw2.SimpleMessage) {
 	if requestPo != nil {
 		var request objects.LogsRequest
 		if err := requestPo.(bw2.MsgPackPayloadObject).ValueInto(&request); err != nil {
-			fmt.Println("Failed to unmarshal log request:", err)
+			logs[id].Error("Received log request, but failed to parse it")
+			return
 		}
 
 		runningSvcsLocks[id].Lock()
 		_, ok := runningServices[id][request.SvcName]
 		runningSvcsLocks[id].Unlock()
 		if !ok {
+			logs[id].Debugf("Received log request for non-existent service %s", request.SvcName)
 			ologs[id] <- SLM{Service: request.SvcName, Message: "[FAILURE] Service not found"}
 		}
 
@@ -605,7 +646,7 @@ func handleLogs(id int, msg *bw2.SimpleMessage) {
 					Messages: buffer,
 				}
 				if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
-					fmt.Println("Warning -- failed to publish logs response:", err)
+					logs[id].Errorf("Failed to publish response to logs request for service %s: %s", request.SvcName, err)
 				}
 				nextIdx = 0
 			}
@@ -616,7 +657,7 @@ func handleLogs(id int, msg *bw2.SimpleMessage) {
 				Messages: buffer[:nextIdx],
 			}
 			if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
-				fmt.Println("Warning -- failed to publish logs response:", err)
+				logs[id].Errorf("Failed to publish response to logs request for service %s: %s", request.SvcName, err)
 			}
 		}
 
@@ -626,7 +667,7 @@ func handleLogs(id int, msg *bw2.SimpleMessage) {
 			Messages: []string{},
 		}
 		if err := sendLogResponse(&logResponse, spInterfaces[id], "logs/"+request.SvcName); err != nil {
-			fmt.Println("Warning -- failed to publish final logs response:", err)
+			logs[id].Errorf("Failed to publish response to logs request for service %s: %s", request.SvcName, err)
 		}
 	}
 }
@@ -640,19 +681,22 @@ func curryHandleLogs(id int) func(*bw2.SimpleMessage) {
 func sendLogResponse(response *objects.LogsResponse, ifc *bw2.Interface, signal string) error {
 	logRespPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumMsgPack, response)
 	if err != nil {
-		return fmt.Errorf("Failed to create log response PO: %v", err)
+		return errors.Wrap(err, "Failed to create log response PO")
 	}
 	if err = ifc.PublishSignal(signal, logRespPo); err != nil {
-		return fmt.Errorf("Failed to publish logs response: %v", err)
+		return errors.Wrap(err, "Bosswave publish failed")
 	}
 	return nil
 }
 
 func manageService(id int, mfst *Manifest) {
 	alias := cfgs[id].Alias
+	svcName := mfst.ServiceName
+	log := logs[id]
 	for event := range *mfst.eventChan {
 		switch event {
 		case boot:
+			log.Debugf("(%s) State machine received boot event", svcName)
 			// Previous version of service could already be running
 			runningSvcsLocks[id].Lock()
 			existingManifest, ok := runningServices[id][mfst.ServiceName]
@@ -660,7 +704,8 @@ func manageService(id int, mfst *Manifest) {
 			previousMem := int64(0)
 			previousCPU := int64(0)
 			if ok && existingManifest.Container != nil {
-				ologs[id] <- SLM{mfst.ServiceName, "[INFO] Found instance of service already running"}
+				log.Debugf("(%s) Previous manifest already present for this service", svcName)
+				ologs[id] <- SLM{mfst.ServiceName, "Found instance of service already running"}
 				previousMem = int64(existingManifest.MemAlloc)
 				previousCPU = int64(existingManifest.CPUShares)
 			}
@@ -668,18 +713,23 @@ func manageService(id int, mfst *Manifest) {
 			// Check if Spawnpoint has sufficient resources. If not, reject configuration
 			availLocks[id].Lock()
 			if int64(mfst.MemAlloc) > (availableMem[id] + int64(previousMem)) {
-				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
+				msg := fmt.Sprintf("Insufficient memory for requested allocation (have %d, want %d)",
 					availableMem[id]+previousMem, mfst.MemAlloc)
-				ologs[id] <- SLM{mfst.ServiceName, msg}
+				log.Debugf("(%s) %s", mfst.ServiceName, msg)
+				ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] " + msg}
 				availLocks[id].Unlock()
 				return
 			} else if int64(mfst.CPUShares) > (availableCPUShares[id] + int64(previousCPU)) {
-				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
+				msg := fmt.Sprintf("Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
 					availableCPUShares[id]+previousCPU, mfst.CPUShares)
-				ologs[id] <- SLM{mfst.ServiceName, msg}
+				log.Debugf("(%s) %s", mfst.ServiceName, msg)
+				ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] " + msg}
 				availLocks[id].Unlock()
 				return
 			} else {
+				log.Debugf("(%s) Sufficient resources available, launching service", svcName)
+				// Yes, mem and CPU pools can temporarily go negative here
+				// This will be resolved when the old container dies and triggers cleanup
 				availableMem[id] -= int64(mfst.MemAlloc)
 				availableCPUShares[id] -= int64(mfst.CPUShares)
 				availLocks[id].Unlock()
@@ -687,9 +737,12 @@ func manageService(id int, mfst *Manifest) {
 
 			// Remove previous version if necessary
 			if ok && existingManifest.Container != nil {
+				log.Debugf("(%s) Stopping previous container to accommodate launch of new container",
+					mfst.ServiceName)
 				existingManifest.stopping = true
 				err := StopContainer(alias, existingManifest.ServiceName, true)
 				if err != nil {
+					log.Errorf("(%s) Unable to remove existing service: %s", mfst.ServiceName, err)
 					ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] Unable to remove existing service"}
 					existingManifest.stopping = false
 					return
@@ -703,9 +756,12 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Unlock()
 
 			// Now start the container
+			log.Infof("(%s) Booting service with Docker", mfst.ServiceName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Booting service"}
 			container, err := RestartContainer(alias, mfst, cfgs[id].ContainerRouter, true)
 			if err != nil {
+				log.Errorf("(%s) Docker unable to restart container: %s", mfst.ServiceName, err)
+				log.Errorf("(%s) Rolling back resource alloctions for new container", mfst.ServiceName)
 				msg := fmt.Sprintf("[FAILURE] Unable to (re)start container: %v", err)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				availLocks[id].Lock()
@@ -721,24 +777,30 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
-			msg := "[SUCCESS] Container (re)start successful"
-			ologs[id] <- SLM{mfst.ServiceName, msg}
+			msg := "Container (re)start successful"
+			log.Debugf("(%s) "+msg, mfst.ServiceName)
+			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] " + msg}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
 		case restart:
 			// Restart a currently running service
+			log.Debugf("(%s) State machine received restart event", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Attempting restart"}
 			mfst.restarting = true
 			err := StopContainer(alias, mfst.ServiceName, false)
 			if err != nil {
 				mfst.restarting = false
+				log.Errorf("(%s) Failed to stop existing service as part of restart", svcName)
 				ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] Unable to stop existing service"}
 				continue
 			}
+			log.Debugf("(%s) Stopped existing service", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Stopped existing service"}
 
+			log.Debugf("(%s) Restarting container with Docker", svcName)
 			container, err := RestartContainer(alias, mfst, cfgs[id].ContainerRouter, false)
 			if err != nil {
+				log.Errorf("(%s) Docker failed to restart container", svcName)
 				msg := fmt.Sprintf("[FAILURE] Unable to restart container: %v", err)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				runningSvcsLocks[id].Lock()
@@ -754,14 +816,19 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
+			log.Debugf("(%s) Docker container restart successful", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
 		case autoRestart:
 			// Auto-restart a service that has just terminated
+			log.Debugf("(%s) State machine received auto restart event", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Attempting auto-restart"}
+			log.Debugf("(%s) Restarting container with Docker", svcName)
 			container, err := RestartContainer(alias, mfst, cfgs[id].ContainerRouter, false)
 			if err != nil {
+				log.Errorf("(%s) Docker failed to restart container: %s", svcName, err)
+				log.Errorf("(%s) Releasing allocated resources", svcName)
 				msg := fmt.Sprintf("[FAILURE] Unable to auto-restart container: %v", err)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				runningSvcsLocks[id].Lock()
@@ -777,37 +844,42 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
+			log.Debugf("(%s) Container auto restart successful", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container auto-restart successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
 		case resurrect:
+			log.Debugf("(%s) State machine received resurrect event", svcName)
 			// Try to start up a recently terminated service
 			// Start by checking if we have sufficient resources
 			availLocks[id].Lock()
 			if int64(mfst.MemAlloc) > availableMem[id] {
-				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint memory for requested allocation (have %d, want %d)",
-					availableMem[id], mfst.MemAlloc)
-				ologs[id] <- SLM{mfst.ServiceName, msg}
+				msg := fmt.Sprintf("Insufficient memory for requested allocation (have %d, want %d)", availableMem[id], mfst.MemAlloc)
+				log.Debugf("(%s) %s", svcName, msg)
+				ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] " + msg}
 				availLocks[id].Unlock()
 				// We can just let the deferred manifest removal take effect
 				return
 			} else if int64(mfst.CPUShares) > availableCPUShares[id] {
-				msg := fmt.Sprintf("[FAILURE] Insufficient Spawnpoint CPU shares for requested allocation (have %d, want %d)",
-					availableCPUShares, mfst.CPUShares)
+				msg := fmt.Sprintf("Insufficient CPU shares for requested allocation (have %d, want %d)", availableCPUShares, mfst.CPUShares)
+				log.Debugf("(%s) %s", svcName, alias)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				availLocks[id].Unlock()
 				// We can just let the deferred manifest removal take effect
 				return
 			} else {
+				log.Debugf("(%s) Sufficient resources available, starting service", svcName)
 				availableMem[id] -= int64(mfst.MemAlloc)
 				availableCPUShares[id] -= int64(mfst.CPUShares)
 				availLocks[id].Unlock()
 			}
 
 			// Now restart the container
+			log.Debugf("(%s) Starting container with Docker", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Attempting to restart container"}
 			container, err := RestartContainer(alias, mfst, cfgs[id].ContainerRouter, false)
 			if err != nil {
+				log.Errorf("(%s) Docker failed to start container: %s", svcName, err)
 				msg := fmt.Sprintf("[FAILURE] Unable to (re)start container: %v", err)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				availLocks[id].Lock()
@@ -819,33 +891,41 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
-			msg := "[SUCCESS] Container (re)start successful"
-			ologs[id] <- SLM{mfst.ServiceName, msg}
+			log.Debugf("(%s) Container (re)start successful", svcName)
+			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container (re)start successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
 
 		case stop:
+			log.Debugf("(%s) State machine received stop event", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Attempting to stop container"}
 			if mfst.Container == nil {
+				log.Debugf("(%s) Service has already been stopped, no further action needed", svcName)
 				ologs[id] <- SLM{mfst.ServiceName, "[INFO] Container is already stopped"}
 			} else {
 				// Updating available mem and cpu shares done by event monitor
+				log.Debugf("(%s) Stopping container with Docker", svcName)
 				err := StopContainer(alias, mfst.ServiceName, true)
 				if err != nil {
+					log.Errorf("(%s) Docker failed to stop container: %s", svcName, err)
 					msg := fmt.Sprintf("[FAILURE] Unable to stop container: %v", err)
 					ologs[id] <- SLM{mfst.ServiceName, msg}
 				} else {
 					mfst.stopping = true
+					log.Debugf("(%s) Docker has stopped container", svcName)
 					ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container stopped"}
 				}
 			}
 
 		case die:
+			log.Debugf("(%s) State machine received die event", svcName)
 			if mfst.restarting {
+				log.Debugf("(%s) This is part of normal restart process, ignoring", svcName)
 				mfst.restarting = false
 				continue
 			}
-			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Container has stopped"}
+			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Container has died"}
 			if mfst.AutoRestart && !mfst.stopping {
+				log.Debugf("(%s) Initiating automatic restart in %s", svcName, mfst.RestartInt.String())
 				go func() {
 					if mfst.RestartInt > 0 {
 						time.Sleep(mfst.RestartInt)
@@ -854,21 +934,25 @@ func manageService(id int, mfst *Manifest) {
 				}()
 			} else {
 				if mfst.stopping {
+					log.Debugf("(%s) This is part of manual service stop, ignoring die event", svcName)
 					mfst.stopping = false
 				}
 				runningSvcsLocks[id].Lock()
 				mfst.Container = nil
 				runningSvcsLocks[id].Unlock()
+				log.Debugf("(%s) Releasing service resource allocations", svcName)
 				availLocks[id].Lock()
 				availableCPUShares[id] += int64(mfst.CPUShares)
 				availableMem[id] += int64(mfst.MemAlloc)
 				availLocks[id].Unlock()
 
 				// Defer removal of the manifest in case user wants to restart
+				log.Debugf("(%s) Service will remain a zombie for %s", svcName, mfst.ZombiePeriod.String())
 				time.AfterFunc(mfst.ZombiePeriod, func() {
 					runningSvcsLocks[id].Lock()
 					latestMfst, ok := runningServices[id][mfst.ServiceName]
 					if ok && latestMfst.Container == nil {
+						log.Debugf("(%s) Zombie period expired, purging dead service manifest", svcName)
 						delete(runningServices[id], mfst.ServiceName)
 						close(*mfst.eventChan)
 					}
@@ -879,6 +963,7 @@ func manageService(id int, mfst *Manifest) {
 			}
 
 		case adopt:
+			log.Debugf("(%s) Reassuming ownership of running service upon spawnd restart", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[INFO] Reassuming ownership upon spawnd restart"}
 			availLocks[id].Lock()
 			availableMem[id] -= int64(mfst.MemAlloc)
@@ -889,7 +974,8 @@ func manageService(id int, mfst *Manifest) {
 	}
 }
 
-func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
+func svcHeartbeat(id int, svcName string, statCh *chan *docker.Stats) {
+	logs[id].Debugf("(%s) Starting service heartbeat loop", svcName)
 	spURI := cfgs[id].Path
 
 	lastEmitted := time.Now()
@@ -897,7 +983,7 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 	for stats := range *statCh {
 		if stats.Read.Sub(lastEmitted).Seconds() > heartbeatPeriod {
 			runningSvcsLocks[id].Lock()
-			manifest, ok := runningServices[id][svcname]
+			manifest, ok := runningServices[id][svcName]
 			runningSvcsLocks[id].Unlock()
 			if !ok {
 				return
@@ -927,7 +1013,7 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 
 			msg := objects.SpawnpointSvcHb{
 				SpawnpointURI:  spURI,
-				Name:           svcname,
+				Name:           svcName,
 				Time:           time.Now().UnixNano(),
 				MemAlloc:       manifest.MemAlloc,
 				CPUShares:      manifest.CPUShares,
@@ -939,14 +1025,13 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 				CPUPercent:     lastCPUPercentage,
 				OriginalConfig: manifest.OriginalConfig,
 			}
+			logs[id].Debugf("(%s) Publishing service heartbeat", svcName)
 
 			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, msg)
 			if err != nil {
-				panic(err)
-			}
-			if err = spInterfaces[id].PublishSignal("heartbeat/"+svcname, hbPo); err != nil {
-				fmt.Printf("%s[WARN]%s Failed to publish heartbeat for service %s: %v\n",
-					ansi.ColorCode("yellow+b"), ansi.ColorCode("reset"), svcname, err)
+				logs[id].Errorf("(%s) Failed to marshal service heartbeat: %s", svcName, err)
+			} else if err = spInterfaces[id].PublishSignal("heartbeat/"+svcName, hbPo); err != nil {
+				logs[id].Errorf("(%s) Failed to publish service heartbeat message: %s", svcName, err)
 			}
 
 			lastEmitted = time.Now()
@@ -954,16 +1039,17 @@ func svcHeartbeat(id int, svcname string, statCh *chan *docker.Stats) {
 	}
 }
 
-func depersistSvcHb(id int, svcname string) {
+func depersistSvcHb(id int, svcName string) {
 	// Publishing a message with no POs is effectively a "de-persist" operation
-	if err := spInterfaces[id].PublishSignal("heartbeat/" + svcname); err != nil {
-		fmt.Printf("%s[WARN]%s Failed to de-persist heartbeat for servfice %s: %v\n",
-			ansi.ColorCode("yellow+b"), ansi.ColorCode("reset"), svcname, err)
+	logs[id].Debugf("(%s) De-persisting service heartbeat message", svcName)
+	if err := spInterfaces[id].PublishSignal("heartbeat/" + svcName); err != nil {
+		logs[id].Errorf("(%s) Failed to de-persist service heartbeat: %s", svcName, err)
 	}
 }
 
 func persistManifests(id int) {
 	for {
+		logs[id].Debug("Saving service manifests snapshot")
 		runningSvcsLocks[id].Lock()
 		manifests := make([]Manifest, len(runningServices[id]))
 		i := 0
@@ -998,11 +1084,9 @@ func persistManifests(id int) {
 
 		encoder := gob.NewEncoder(&manifestRaw)
 		if err := encoder.Encode(manifests); err != nil {
-			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
-				ansi.ColorCode("reset"), err)
+			logs[id].Errorf("Failed to marshal manifests: %s", err)
 		} else if err := ioutil.WriteFile(mfstFileDest, manifestRaw.Bytes(), 0600); err != nil {
-			fmt.Printf("%s[WARN]%s Failed to encode manifests: %v\n", ansi.ColorCode("yellow+b"),
-				ansi.ColorCode("reset"), err)
+			logs[id].Errorf("Failed to write manifest snapshot to file: %s", err)
 		}
 		time.Sleep(persistManifestPeriod * time.Second)
 	}
@@ -1014,26 +1098,32 @@ func recoverPreviousState() {
 		if mfstFileEnv := os.Getenv(persistEnvVar); mfstFileEnv != "" {
 			mfstFileSrc = mfstFileEnv + "/" + mfstFileSrc
 		}
+		logs[i].Debugf("Attempting to recover state from previous manifests snapshot at %s", mfstFileSrc)
 		mfstBytes, err := ioutil.ReadFile(mfstFileSrc)
 		if err != nil {
-			fmt.Printf("Error (%s): Failed to read persisted manifests: %v", cfgs[i].Alias, err)
+			// This isn't a huge deal, happens e.g. for new spawnpoints
+			logs[i].Warningf("Failed to read manifests snapshot: %s", err)
 			return
 		}
 
 		var priorManifests []Manifest
 		decoder := gob.NewDecoder(bytes.NewReader(mfstBytes))
 		if err = decoder.Decode(&priorManifests); err != nil {
-			fmt.Printf("Error (%s): Failed to decode persisted manifests: %v", cfgs[i].Alias, err)
+			logs[i].Errorf("Failed to decode manifests snapshot file: %s", err)
+			continue
+		} else {
+			logs[i].Debugf("Successfully read manifests snapshot")
 		}
 
 		knownContainers, err := GetSpawnedContainers(cfgs[i].Alias)
 		if err != nil {
-			fmt.Printf("Failed to retrieve container info: %v\n", err)
-			return
+			logs[i].Errorf("Failed to retrieve info on running containers from Docker")
+			continue
 		}
 
 		reclaimedManifests := make(map[string]*Manifest)
 		for _, mfst := range priorManifests {
+			logs[i].Debugf("(%s) Attempting to restore service", mfst.ServiceName)
 			thisMfst := mfst
 			newEvChan := make(chan svcEvent, 5)
 			thisMfst.eventChan = &newEvChan
@@ -1041,13 +1131,17 @@ func recoverPreviousState() {
 			thisMfst.logger = logger
 			containerInfo, ok := knownContainers[thisMfst.ServiceName]
 			if ok && containerInfo.Raw.State.Running {
+				logs[i].Debugf("(%s) Service remained running, reclaiming it", mfst.ServiceName)
 				thisMfst.Container = ReclaimContainer(&thisMfst, containerInfo.Raw)
 				go manageService(i, &thisMfst)
 				reclaimedManifests[thisMfst.ServiceName] = &thisMfst
 				newEvChan <- adopt
 			} else if mfst.AutoRestart {
+				logs[i].Debugf("(%s) Service is no longer running, but has auto restart enabled", mfst.ServiceName)
 				go manageService(i, &thisMfst)
 				newEvChan <- boot
+			} else {
+				logs[i].Debugf("(%s) Service has died, but no auto restart was requested", mfst.ServiceName)
 			}
 		}
 		runningSvcsLocks[i].Lock()
