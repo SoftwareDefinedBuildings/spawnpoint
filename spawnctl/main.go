@@ -12,8 +12,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/immesys/spawnpoint/objects"
-	"github.com/immesys/spawnpoint/spawnclient"
+	"github.com/SoftwareDefinedBuildings/spawnpoint/objects"
+	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnclient"
 	"gopkg.in/yaml.v2"
 
 	"github.com/mgutz/ansi"

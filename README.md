@@ -269,7 +269,7 @@ configuration could be used.
 
 ```yaml
 entity: ~/bosswave/spawnpointTest.key
-container: immesys/spawnpoint:amd64
+container: jhkolb/spawnpoint:amd64
 build: [go get github.com/jkolb1/demosvc]
 run: [demosvc, 100]
 memAlloc: 512M

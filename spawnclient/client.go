@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/immesys/spawnpoint/objects"
+	"github.com/SoftwareDefinedBuildings/spawnpoint/objects"
 	"github.com/jhoonb/archivex"
 	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
