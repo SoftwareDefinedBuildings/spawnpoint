@@ -109,6 +109,7 @@ if [ ! -e /etc/spawnd/config.yml ]; then
 	localRouter: 172.17.0.1:28589
 	containerRouter: 172.17.0.1:28589
 	allowHostNet: false
+	allowDeviceMappings: false
 	EOF
 
     entity=''

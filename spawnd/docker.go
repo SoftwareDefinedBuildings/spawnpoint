@@ -131,10 +131,11 @@ func RestartContainer(alias string, cfg *Manifest, bwRouter string, rebuildImg b
 	var containerDevices []docker.Device
 	if len(cfg.Devices) > 0 {
 		containerDevices = make([]docker.Device, len(cfg.Devices))
-		for i, device := range cfg.Devices {
+		for i, devicePath := range cfg.Devices {
 			containerDevices[i] = docker.Device{
-				PathOnHost:      device,
-				PathInContainer: device,
+				PathOnHost:        devicePath,
+				PathInContainer:   devicePath,
+				CgroupPermissions: "rwm",
 			}
 		}
 	}

@@ -11,7 +11,7 @@ Currently, the script only supports 64-bit Ubuntu Linux installations that use
 when run on other platforms.
 
 Additionally, the installer currently does not configure the metadata that is
-advertised by the spawnpoint. To do this, you must edit `/etc/spawnd/metadat.yml`
+advertised by the spawnpoint. To do this, you must edit `/etc/spawnd/metadata.yml`
 manually.
 
 This script will then take the following steps:
@@ -40,8 +40,8 @@ This script will then take the following steps:
   7. Start up the new `spawnd` service, after enabling it to start on boot as
      well.
 
-### What about host networking?
-In general, allowing containers to use the host network is discouraged unless
-you know what you are doing. Therefore, it is disabled by the installer by
-default, but the installer will not change your old settings when performing
-an update.
+### What about host networking and mapping devices?
+In general, allowing containers to use the host network or to directly access
+host devices is discouraged unless you know what you are doing. Therefore, it is
+disabled by the installer by default, but the installer will not change your old
+settings when performing an update.

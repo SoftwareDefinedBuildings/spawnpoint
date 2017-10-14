@@ -94,8 +94,13 @@ Currently, the valid parameters are:
   interface. Note that this represents a major security risk. Don't enable this
   unless you are very confident that you need it.
 
-A typical Spawnpoint configuration file might look as follows. Note that the
-`localRouter` parameter is omitted, and thus it takes on the default value.
+* `allowDeviceMappings` (optional): If enabled, this allows devices on a
+  Spawnpoint host (e.g. `/dev/tty1`) to be mapped into containers running on
+  that host. This allows containers to access these devices. Note that this
+  represents a security risk. Don't enable this feature unless you understand
+  the consequences and are confident that you need it.
+
+A typical Spawnpoint configuration file might look as follows.
 ```yaml
 entity: ~/bosswave/spawnpointTest.key
 path: scratch.ns/spawnpoint/alpha

@@ -24,7 +24,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.4`
+const versionNum = `0.5.5`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
 const logReaderBufSize = 1024
@@ -514,8 +514,14 @@ func handleConfig(id int, msg *bw2.SimpleMessage) {
 	}
 
 	if trueCfg.UseHostNet && !cfgs[id].AllowHostNet {
-		alias := cfgs[id].Alias
-		err := fmt.Errorf("Spawnpoint %s does not allow use of host network stack", alias)
+		err := fmt.Errorf("Spawnpoint %s does not allow use of host network stack",
+			cfgs[id].Alias)
+		panic(err)
+	}
+
+	if len(trueCfg.Devices) > 0 && !cfgs[id].AllowDeviceMappings {
+		err := fmt.Errorf("Spawnpoint %s does not allow host devices to be mapped into containers",
+			cfgs[id].Alias)
 		panic(err)
 	}
 
