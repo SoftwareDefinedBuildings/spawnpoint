@@ -121,8 +121,8 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     else
         entity="$(whiptail --nocancel --inputbox "Type the path to the Bosswave Entity for this Spawnpoint." \
                   10 78 --title "Entity Selection" 3>&1 1>&2 2>&3)"
-        $sh_c "cp $entity /etc/spawnd/"
     fi
+    $sh_c "cp $entity /etc/spawnd/"
 
     if [ -n "$SPAWND_INSTALLER_PATH" ]; then
         path="$SPAWND_INSTALLER_PATH"
