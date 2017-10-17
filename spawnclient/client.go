@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/objects"
+	bw2 "github.com/immesys/bw2bind"
 	"github.com/jhoonb/archivex"
-	bw2 "gopkg.in/immesys/bw2bind.v5"
 )
 
 type SpawnClient struct {
