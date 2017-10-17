@@ -20,7 +20,7 @@ import (
 	"github.com/pkg/errors"
 
 	docker "github.com/fsouza/go-dockerclient"
-	bw2 "gopkg.in/immesys/bw2bind.v5"
+	bw2 "github.com/immesys/bw2bind"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -207,8 +207,7 @@ func actionDecommission(c *cli.Context) error {
 		service := bwClients[i].RegisterService(cfg.Path, "s.spawnpoint")
 		iface := service.RegisterInterface("server", "i.spawnpoint")
 		// Publishing a message without any POs is effectively a "de-persist"
-		err = iface.PublishSignal("heartbeat")
-		if err != nil {
+		if err = iface.PublishSignal("heartbeat"); err != nil {
 			logs[i].Fatalf("Failed to decommission spawnpoint %s: %v", cfg.Alias, err)
 		}
 	}
@@ -252,12 +251,34 @@ func actionRun(c *cli.Context) error {
 	spInterfaces = make([]*bw2.Interface, len(cfgs))
 	for i, cfg := range cfgs {
 		spServices[i] = bwClients[i].RegisterService(cfg.Path, "s.spawnpoint")
+		spServices[i].SetErrorHandler(func(err error) {
+			logs[i].Errorf("Failed to register service metadata: %s", err)
+		})
 		spInterfaces[i] = spServices[i].RegisterInterface("server", "i.spawnpoint")
 
-		spInterfaces[i].SubscribeSlot("config", curryHandleConfig(i))
-		spInterfaces[i].SubscribeSlot("restart", curryHandleRestart(i))
-		spInterfaces[i].SubscribeSlot("stop", curryHandleStop(i))
-		spInterfaces[i].SubscribeSlot("logs", curryHandleLogs(i))
+		if err = spInterfaces[i].SubscribeSlot("config", curryHandleConfig(i)); err != nil {
+			logs[i].Fatalf("Failed to subscribe to slot %s: %s", spInterfaces[i].SlotURI("config"), err)
+		} else {
+			logs[i].Debugf("Subscribed to slot %s", spInterfaces[i].SlotURI("config"))
+		}
+
+		if err = spInterfaces[i].SubscribeSlot("restart", curryHandleRestart(i)); err != nil {
+			logs[i].Fatalf("Failed to subscribe to slot %s: %s", spInterfaces[i].SlotURI("restart"), err)
+		} else {
+			logs[i].Debugf("Subscribed to slot %s", spInterfaces[i].SlotURI("restart"))
+		}
+
+		if err = spInterfaces[i].SubscribeSlot("stop", curryHandleStop(i)); err != nil {
+			logs[i].Fatalf("Failed to subscribe to slot: %s: %s", spInterfaces[i].SlotURI("stop"), err)
+		} else {
+			logs[i].Debugf("Subscribed to slot %s", spInterfaces[i].SlotURI("stop"))
+		}
+
+		if err = spInterfaces[i].SubscribeSlot("logs", curryHandleLogs(i)); err != nil {
+			logs[i].Fatalf("Failed to subscribe to slot: %s: %s", spInterfaces[i].SlotURI("logs"), err)
+		} else {
+			logs[i].Debugf("Subscribed to slot %s", spInterfaces[i].SlotURI("logs"))
+		}
 	}
 
 	// Set Spawnpoint metadata
