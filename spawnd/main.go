@@ -844,6 +844,7 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
+
 			log.Debugf("(%s) Docker container restart successful", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container restart successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
@@ -886,15 +887,23 @@ func manageService(id int, mfst *Manifest) {
 				log.Debugf("(%s) %s", svcName, msg)
 				ologs[id] <- SLM{mfst.ServiceName, "[FAILURE] " + msg}
 				availLocks[id].Unlock()
-				// We can just let the deferred manifest removal take effect
-				return
+
+				runningSvcsLocks[id].Lock()
+				delete(runningServices[id], mfst.ServiceName)
+				runningSvcsLocks[id].Unlock()
+				close(*mfst.eventChan)
+				depersistSvcHb(id, mfst.ServiceName)
 			} else if int64(mfst.CPUShares) > availableCPUShares[id] {
 				msg := fmt.Sprintf("Insufficient CPU shares for requested allocation (have %d, want %d)", availableCPUShares, mfst.CPUShares)
 				log.Debugf("(%s) %s", svcName, alias)
 				ologs[id] <- SLM{mfst.ServiceName, msg}
 				availLocks[id].Unlock()
-				// We can just let the deferred manifest removal take effect
-				return
+
+				runningSvcsLocks[id].Lock()
+				delete(runningServices[id], mfst.ServiceName)
+				runningSvcsLocks[id].Unlock()
+				close(*mfst.eventChan)
+				depersistSvcHb(id, mfst.ServiceName)
 			} else {
 				log.Debugf("(%s) Sufficient resources available, starting service", svcName)
 				availableMem[id] -= int64(mfst.MemAlloc)
@@ -919,6 +928,7 @@ func manageService(id int, mfst *Manifest) {
 			runningSvcsLocks[id].Lock()
 			mfst.Container = container
 			runningSvcsLocks[id].Unlock()
+
 			log.Debugf("(%s) Container (re)start successful", svcName)
 			ologs[id] <- SLM{mfst.ServiceName, "[SUCCESS] Container (re)start successful"}
 			go svcHeartbeat(id, mfst.ServiceName, mfst.Container.StatChan)
@@ -974,20 +984,31 @@ func manageService(id int, mfst *Manifest) {
 				availableMem[id] += int64(mfst.MemAlloc)
 				availLocks[id].Unlock()
 
-				// Defer removal of the manifest in case user wants to restart
+				// Defer removal of the manifest in case user wants to resurrect service
 				log.Debugf("(%s) Service will remain a zombie for %s", svcName, mfst.ZombiePeriod.String())
-				time.AfterFunc(mfst.ZombiePeriod, func() {
+				// Temporarily hijack state machine from the main loop
+				timeout := time.NewTimer(mfst.ZombiePeriod)
+				select {
+				case <-timeout.C:
+					// Zombie period has expired, purge service data
+					log.Debugf("(%s) Zombie period expired, purging dead service manifest", svcName)
 					runningSvcsLocks[id].Lock()
-					latestMfst, ok := runningServices[id][mfst.ServiceName]
-					if ok && latestMfst.Container == nil {
-						log.Debugf("(%s) Zombie period expired, purging dead service manifest", svcName)
-						delete(runningServices[id], mfst.ServiceName)
-						close(*mfst.eventChan)
-					}
+					delete(runningServices[id], mfst.ServiceName)
 					runningSvcsLocks[id].Unlock()
-
+					close(*mfst.eventChan)
 					depersistSvcHb(id, mfst.ServiceName)
-				})
+
+				case event = <-*mfst.eventChan:
+					if event == resurrect {
+						// No purging necessary, we need to restart service
+						// Re-enqueue the event and let the main loop reassume control
+						log.Debugf("(%s) Service will be resurrected, zombie period cancelled", svcName)
+						*mfst.eventChan <- resurrect
+					} else {
+						// This should never happen
+						log.Errorf("(%s) Received non resurrect event for state machine in zombie state, ignoring", svcName)
+					}
+				}
 			}
 
 		case adopt:
