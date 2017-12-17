@@ -15,6 +15,7 @@ import (
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/objects"
 	"github.com/codegangsta/cli"
+	"github.com/docker/docker/api/types/events"
 	"github.com/mgutz/ansi"
 	"github.com/op/go-logging"
 	"github.com/pkg/errors"
@@ -24,7 +25,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.6`
+const versionNum = `0.5.7`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
 const logReaderBufSize = 1024
@@ -303,11 +304,11 @@ func actionRun(c *cli.Context) error {
 	}
 
 	// Start docker connection
-	dockerEventCh, err := ConnectDocker()
+	dockerEventCh, errCh, err := ConnectDocker()
 	if err != nil {
 		globalLog.Fatalf("Failed to connect to Docker daemon: %s", err)
 	}
-	go monitorDockerEvents(&dockerEventCh)
+	go monitorDockerEvents(dockerEventCh, errCh)
 
 	// If possible, recover state from persistence file
 	runningServices = make([](map[string]*Manifest), len(cfgs))
@@ -397,24 +398,30 @@ func heartbeat(id int) {
 	}
 }
 
-func monitorDockerEvents(ec *chan *docker.APIEvents) {
-	for event := range *ec {
-		if event.Action == "die" {
-			globalLog.Debugf("Docker container has died: %s", event.Actor.ID)
-		outer:
-			for i := 0; i < len(cfgs); i++ {
-				runningSvcsLocks[i].Lock()
-				for _, manifest := range runningServices[i] {
-					if manifest.Container != nil && manifest.Container.Raw.ID == event.Actor.ID {
-						logs[i].Debugf("Dead Docker container ID %s matches service %s, issuing die event",
-							event.Actor.ID, manifest.ServiceName)
-						*manifest.eventChan <- die
-						runningSvcsLocks[i].Unlock()
-						break outer
+func monitorDockerEvents(evCh *<-chan events.Message, errCh *<-chan error) {
+	for {
+		select {
+		case event := <-*evCh:
+			if event.Action == "die" {
+				globalLog.Debugf("Docker container has died: %s", event.Actor.ID)
+			outer:
+				for i := 0; i < len(cfgs); i++ {
+					runningSvcsLocks[i].Lock()
+					for _, manifest := range runningServices[i] {
+						if manifest.Container != nil && manifest.Container.Raw.ID == event.Actor.ID {
+							logs[i].Debugf("Dead Docker container ID %s matches service %s, issuing die event",
+								event.Actor.ID, manifest.ServiceName)
+							*manifest.eventChan <- die
+							runningSvcsLocks[i].Unlock()
+							break outer
+						}
 					}
+					runningSvcsLocks[i].Unlock()
 				}
-				runningSvcsLocks[i].Unlock()
 			}
+
+		case err := <-*errCh:
+			globalLog.Criticalf("Lost connection to Docker daemon: %s", err)
 		}
 	}
 }

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"strings"
 
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/events"
+	moby "github.com/docker/docker/client"
 	docker "github.com/fsouza/go-dockerclient"
 )
 
@@ -20,16 +24,19 @@ type SpawnPointContainer struct {
 	StatChan    *chan *docker.Stats
 }
 
-func ConnectDocker() (chan *docker.APIEvents, error) {
+func ConnectDocker() (*<-chan events.Message, *<-chan error, error) {
 	var err error
 	dkr, err = docker.NewClient("unix:///var/run/docker.sock")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	evChan := make(chan *docker.APIEvents)
-	dkr.AddEventListener(evChan)
-	return evChan, err
+	tmpClient, err := moby.NewEnvClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	evChan, errChan := tmpClient.Events(context.Background(), types.EventsOptions{})
+	return &evChan, &errChan, nil
 }
 
 func GetSpawnedContainers(alias string) (map[string]*SpawnPointContainer, error) {
@@ -47,7 +54,17 @@ func GetSpawnedContainers(alias string) (map[string]*SpawnPointContainer, error)
 			if strings.HasPrefix(name, pfx) {
 				container, err := dkr.InspectContainer(containerInfo.ID)
 				if err != nil {
-					return nil, err
+					if _, ok := err.(*docker.NoSuchContainer); !ok {
+						/*
+						 * There is a sort of race condition here: a container that appeared
+						 * as a result from the previous ListContainers command may have
+						 * died before we could call InspectContainer
+						 * This is an unavoidable side-effect of listing and inspecting
+						 * containers in two separate calls to the Docker client
+						 * tl;dr we ignore NoSuchContainer errors here
+						 */
+						return nil, err
+					}
 				}
 
 				svcName := name[len(pfx):]
