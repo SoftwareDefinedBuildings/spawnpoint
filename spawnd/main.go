@@ -997,13 +997,17 @@ func manageService(id int, mfst *Manifest) {
 				timeout := time.NewTimer(mfst.ZombiePeriod)
 				select {
 				case <-timeout.C:
-					// Zombie period has expired, purge service data
-					log.Debugf("(%s) Zombie period expired, purging dead service manifest", svcName)
-					runningSvcsLocks[id].Lock()
-					delete(runningServices[id], mfst.ServiceName)
-					runningSvcsLocks[id].Unlock()
-					close(*mfst.eventChan)
-					depersistSvcHb(id, mfst.ServiceName)
+					// Zombie period has expired, purge service data, unless it has since been redeployed
+					if mfst.Container != nil {
+						log.Debugf("(%s) Zombie period expired, purging dead service manifest", svcName)
+						runningSvcsLocks[id].Lock()
+						delete(runningServices[id], mfst.ServiceName)
+						runningSvcsLocks[id].Unlock()
+						close(*mfst.eventChan)
+						depersistSvcHb(id, mfst.ServiceName)
+					} else {
+						log.Debugf("(%s) Zombie period expired, but new service instance is running, not purging", svcName)
+					}
 
 				case event = <-*mfst.eventChan:
 					if event == resurrect {
