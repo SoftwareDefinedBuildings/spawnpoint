@@ -7,7 +7,7 @@
 #   'wget -qO- https://get.bw2.io/spawnd | sh'
 
 set -e
-REL=0.5.6
+REL=0.5.7
 
 command_exists() {
     command -v "$@" > /dev/null 2>&1
