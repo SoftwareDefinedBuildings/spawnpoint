@@ -7,7 +7,7 @@
 #   'wget -qO- https://get.bw2.io/spawnd | sh'
 
 set -e
-REL=0.5.6
+REL=0.5.8
 
 command_exists() {
     command -v "$@" > /dev/null 2>&1
@@ -96,6 +96,8 @@ set +e
 $sh_c "systemctl stop spawnd"
 set -e
 $sh_c "$curl http://get.bw2.io/spawnd/0.x/Linux/x86_64/$REL/spawnd.service > /etc/systemd/system/spawnd.service"
+dockerClientVersion="$(docker version -f {{.Client.APIVersion}})"
+$sh_c "sed -i 's/{{dockerClientVersion}}/$dockerClientVersion/' /etc/systemd/system/spawnd.service"
 $sh_c "systemctl daemon-reload"
 $sh_c "systemctl enable spawnd"
 

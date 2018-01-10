@@ -25,7 +25,7 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
-const versionNum = `0.5.7`
+const versionNum = `0.5.8`
 const defaultZombiePeriod = 2 * time.Minute
 const persistEnvVar = "SPAWND_PERSIST_DIR"
 const logReaderBufSize = 1024
@@ -421,7 +421,7 @@ func monitorDockerEvents(evCh *<-chan events.Message, errCh *<-chan error) {
 			}
 
 		case err := <-*errCh:
-			globalLog.Criticalf("Lost connection to Docker daemon: %s", err)
+			globalLog.Fatalf("Lost connection to Docker daemon: %s", err)
 		}
 	}
 }
