@@ -1,9 +1,8 @@
-entity: /home/jack/bosswave/keys/jackDev.ent
-image: jhkolb/spawnpoint:amd64
-source: git+http://github.com/jhkolb/demosvc
-build: [go get -d, go build -o demosvc]
-run: [./demosvc, 100]
-memAlloc: 512M
+name: demosvc
+bw2Entity: /home/jack/bosswave/keys/jackDev.ent
 cpuShares: 1024
+memory: 512
+source: git+https://github.com/jhkolb/demosvc
+build: [go get -d, go build -o demosvc]
+run: [./demosvc, 20]
 includedFiles: [params.yml]
-useHostNet: false

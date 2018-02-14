@@ -1,2 +1,2 @@
 msg: "Hello, World"
-to: scratch.ns/demosvc/out
+to: "scratch.ns/demosvc"
