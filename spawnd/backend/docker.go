@@ -19,6 +19,7 @@ import (
 )
 
 const defaultSpawnpointImage = "jhkolb/spawnpoint:amd64"
+const logMaxSize = "50m"
 
 type Docker struct {
 	Alias     string
@@ -64,6 +65,11 @@ func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configur
 
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode("bridge"),
+		LogConfig:   container.LogConfig{Config: map[string]string{"max-size": "50m"}},
+		Resources: container.Resources{
+			CPUShares: int64(svcConfig.CPUShares),
+			Memory:    int64(svcConfig.Memory * 1024 * 1024),
+		},
 	}
 	if svcConfig.UseHostNet {
 		hostConfig.NetworkMode = container.NetworkMode("host")
