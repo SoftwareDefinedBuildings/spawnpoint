@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -58,6 +59,60 @@ func main() {
 				},
 			},
 		},
+		{
+			Name:   "restart",
+			Usage:  "Restart a running service",
+			Action: actionRestart,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri, u",
+					Usage:  "Bw2 URI of the host Spawnpoint",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "Name of the service",
+					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "stop",
+			Usage:  "Stop a running service",
+			Action: actionStop,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri, u",
+					Usage:  "Bw2 URI of the host Spawnpoint",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "Name of the service",
+					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "tail",
+			Usage:  "Tail logs of a running service",
+			Action: actionTail,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri, u",
+					Usage:  "Bw2 URI of the host Spawnpoint",
+					Value:  "",
+					EnvVar: "SPAWNPOINT_DEFAULT_URI",
+				},
+				cli.StringFlag{
+					Name:  "name, n",
+					Usage: "Name of the service",
+					Value: "",
+				},
+			},
+		},
 	}
 
 	app.Run(os.Args)
@@ -101,7 +156,7 @@ func actionDeploy(c *cli.Context) error {
 		fmt.Printf("Could not create spawnpoint client: %s\n", err)
 	}
 
-	logChan, errChan, doneChan := spawnClient.Tail(svcName, spawnpointURI)
+	logChan, errChan := spawnClient.Tail(context.Background(), svcName, spawnpointURI)
 	// Check if an error has already occurred
 	select {
 	case err = <-errChan:
@@ -109,10 +164,85 @@ func actionDeploy(c *cli.Context) error {
 		os.Exit(1)
 	default:
 	}
-	defer close(doneChan)
 
 	if err = spawnClient.Deploy(config, spawnpointURI); err != nil {
 		fmt.Printf("Failed to deploy service: %s\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Tailing service logs. Press CTRL-c to exit...")
+	for msg := range logChan {
+		fmt.Println(strings.TrimSpace(msg.Contents))
+	}
+	// Check again if any errors occurred while tailing service log
+	select {
+	case err = <-errChan:
+		fmt.Printf("Error occurred while tailing logs: %s\n", err)
+		os.Exit(1)
+	default:
+	}
+
+	return nil
+}
+
+func actionRestart(c *cli.Context) error {
+	return manipulateService(c, "restart")
+}
+
+func actionStop(c *cli.Context) error {
+	return manipulateService(c, "stop")
+}
+
+func actionTail(c *cli.Context) error {
+	return manipulateService(c, "tail")
+}
+
+func manipulateService(c *cli.Context, command string) error {
+	entity := c.GlobalString("entity")
+	if len(entity) == 0 {
+		fmt.Println("Missing 'entity' parameter")
+		os.Exit(1)
+	}
+	spawnpointURI := fixURI(c.String("uri"))
+	if len(spawnpointURI) == 0 {
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
+	}
+	svcName := c.String("name")
+	if len(svcName) == 0 {
+		fmt.Println("Missing 'name' parameter")
+		os.Exit(1)
+	}
+
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
+	if err != nil {
+		fmt.Printf("Could not create spawnpoint client: %s\n", err)
+	}
+
+	logChan, errChan := spawnClient.Tail(context.Background(), svcName, spawnpointURI)
+	// Check if an error has already occurred
+	select {
+	case err = <-errChan:
+		fmt.Printf("Could not tail service logs: %s\n", err)
+		os.Exit(1)
+	default:
+	}
+
+	switch command {
+	case "stop":
+		if err = spawnClient.Stop(spawnpointURI, svcName); err != nil {
+			fmt.Printf("Could not stop service: %s\n", err)
+			os.Exit(1)
+		}
+	case "restart":
+		if err = spawnClient.Restart(spawnpointURI, svcName); err != nil {
+			fmt.Printf("Could not restart service: %s\n", err)
+			os.Exit(1)
+		}
+	case "tail":
+
+	default:
+		fmt.Printf("Error: unknown service manipulation operation %s\n", command)
 		os.Exit(1)
 	}
 

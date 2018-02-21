@@ -19,3 +19,12 @@ type LogMessage struct {
 	Contents  string
 	Timestamp int64
 }
+
+type Event int
+
+const (
+	Boot    = iota
+	Restart = iota
+	Stop    = iota
+	Die     = iota
+)

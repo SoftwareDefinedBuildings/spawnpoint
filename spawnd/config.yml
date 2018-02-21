@@ -1,5 +1,0 @@
-path: jkolb/spawnpoint/alpha
-bw2Entity: /home/jack/bosswave/keys/jackDev.ent
-cpuShares: 2048
-memory: 2048
-bw2Agent: "172.17.0.1:28589"

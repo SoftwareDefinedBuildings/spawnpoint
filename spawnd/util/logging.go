@@ -7,8 +7,8 @@ import (
 )
 
 func InitLogger(name string) *logging.Logger {
-	format := "%{color}%{level} %{time:Jan 1 15:04:05} %{shortfunc} %{color:reset}▶ %{message}"
-	backend := logging.NewLogBackend(os.Stderr, "", -1)
+	format := "%{color}%{level} %{time:Jan 2 15:04:05} %{shortfunc} %{color:reset}▶ %{message}"
+	backend := logging.NewLogBackend(os.Stderr, "", 0)
 	logBackendLeveled := logging.AddModuleLevel(backend)
 	logging.SetBackend(logBackendLeveled)
 	logging.SetFormatter(logging.MustStringFormatter(format))

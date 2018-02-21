@@ -2,6 +2,7 @@ package spawnclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"io/ioutil"
 	"path/filepath"
@@ -62,7 +63,25 @@ func (sc *SpawnClient) Deploy(config *service.Configuration, uri string) error {
 	return nil
 }
 
-func (sc *SpawnClient) Tail(svcName string, uri string) (<-chan service.LogMessage, <-chan error, chan<- struct{}) {
+func (sc *SpawnClient) Stop(uri string, svcName string) error {
+	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
+	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
+	if err := iFaceClient.PublishSlot("stop"); err != nil {
+		return errors.Wrap(err, "Could not publish to stop slot")
+	}
+	return nil
+}
+
+func (sc *SpawnClient) Restart(uri string, svcName string) error {
+	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
+	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
+	if err := iFaceClient.PublishSlot("restart"); err != nil {
+		return errors.Wrap(err, "Could not publish to restart slot")
+	}
+	return nil
+}
+
+func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-chan service.LogMessage, <-chan error) {
 	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
 	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
 	errChan := make(chan error, 1)
@@ -83,11 +102,10 @@ func (sc *SpawnClient) Tail(svcName string, uri string) (<-chan service.LogMessa
 	}); err != nil {
 		close(logChan)
 		errChan <- errors.Wrap(err, "Failed to subscribe to service log")
-		return logChan, errChan, nil
+		return logChan, errChan
 	}
 
 	tick := time.Tick(30 * time.Second)
-	doneChan := make(chan struct{})
 	// Publish keep-alive log messages
 	go func() {
 		if err := iFaceClient.PublishSlot("keepLogAlive"); err != nil {
@@ -103,13 +121,13 @@ func (sc *SpawnClient) Tail(svcName string, uri string) (<-chan service.LogMessa
 					errChan <- errors.Wrap(err, "Failed to publish log keep-alive message")
 					return
 				}
-			case <-doneChan:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	return logChan, errChan, doneChan
+	return logChan, errChan
 }
 
 func encodeEntityFile(fileName string) (string, error) {

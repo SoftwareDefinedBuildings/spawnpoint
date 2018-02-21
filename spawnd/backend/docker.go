@@ -13,8 +13,8 @@ import (
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
-	logging "github.com/op/go-logging"
 	"github.com/pkg/errors"
 )
 
@@ -24,10 +24,9 @@ type Docker struct {
 	Alias     string
 	bw2Router string
 	client    *docker.Client
-	logger    *logging.Logger
 }
 
-func NewDocker(alias, bw2Router string, logger *logging.Logger) (*Docker, error) {
+func NewDocker(alias, bw2Router string) (*Docker, error) {
 	client, err := docker.NewEnvClient()
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to initialize docker client")
@@ -37,22 +36,19 @@ func NewDocker(alias, bw2Router string, logger *logging.Logger) (*Docker, error)
 		Alias:     alias,
 		bw2Router: bw2Router,
 		client:    client,
-		logger:    logger,
 	}, nil
 }
 
-func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configuration) (chan string, error) {
+func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configuration) (string, error) {
 	baseImage := svcConfig.BaseImage
 	if len(baseImage) == 0 {
 		svcConfig.BaseImage = defaultSpawnpointImage
 	}
-	dkr.logger.Debugf("(%s) Building Docker container from image %s", svcConfig.Name, svcConfig.BaseImage)
 	imageName, err := dkr.buildImage(ctx, svcConfig)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to build service Docker container")
+		return "", errors.Wrap(err, "Failed to build service Docker container")
 	}
 
-	dkr.logger.Debugf("(%s) Setting BW2_AGENT=%s", svcConfig.Name, dkr.bw2Router)
 	envVars := []string{
 		"BW2_DEFAULT_ENTITY=/srv/spawnpoint/entity.key",
 		"BW2_AGENT=" + dkr.bw2Router,
@@ -70,67 +66,119 @@ func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configur
 		NetworkMode: container.NetworkMode("bridge"),
 	}
 	if svcConfig.UseHostNet {
-		dkr.logger.Debugf("(%s) Using bridge networking mode", svcConfig.Name)
 		hostConfig.NetworkMode = container.NetworkMode("host")
-	} else {
-		dkr.logger.Debugf("(%s) Using host networking mode", svcConfig.Name)
 	}
 
 	containerName := fmt.Sprintf("%s_%s", dkr.Alias, svcConfig.Name)
-	dkr.logger.Debugf("(%s) Creating container %s", svcConfig.Name, containerName)
 	createdResult, err := dkr.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, containerName)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to create Docker container")
+		return "", errors.Wrap(err, "Failed to create Docker container")
 	}
 	if err = dkr.client.ContainerStart(ctx, createdResult.ID, types.ContainerStartOptions{}); err != nil {
-		return nil, errors.Wrap(err, "Failed to start Docker container")
+		return "", errors.Wrap(err, "Failed to start Docker container")
 	}
 
-	dkr.logger.Debugf("(%s) Attaching to container output streams", svcConfig.Name)
-	hijackResp, err := dkr.client.ContainerAttach(ctx, containerName, types.ContainerAttachOptions{
-		Logs:   true,
+	return createdResult.ID, nil
+}
+
+func (dkr *Docker) RestartService(ctx context.Context, id string) error {
+	if err := dkr.client.ContainerRestart(ctx, id, nil); err != nil {
+		return errors.Wrap(err, "Could not restart Docker container")
+	}
+	return nil
+}
+
+func (dkr *Docker) StopService(ctx context.Context, id string) error {
+	if err := dkr.client.ContainerStop(ctx, id, nil); err != nil {
+		return errors.Wrap(err, "Could not stop Docker container")
+	}
+	return nil
+}
+
+func (dkr *Docker) RemoveService(ctx context.Context, id string) error {
+	if err := dkr.client.ContainerRemove(ctx, id, types.ContainerRemoveOptions{}); err != nil {
+		return errors.Wrap(err, "Could not remove Docker container")
+	}
+	return nil
+}
+
+func (dkr *Docker) TailService(ctx context.Context, id string, log bool) (<-chan string, <-chan error) {
+	msgChan := make(chan string, 20)
+	errChan := make(chan error, 1)
+
+	hijackResp, err := dkr.client.ContainerAttach(ctx, id, types.ContainerAttachOptions{
+		Logs:   log,
 		Stream: true,
 		Stderr: true,
 		Stdout: true,
 	})
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to attach to Docker container")
+		close(msgChan)
+		errChan <- errors.Wrap(err, "Failed to attach to Docker container")
+		return msgChan, errChan
 	}
-	msgChan := make(chan string, 20)
+
 	go func() {
 		defer hijackResp.Close()
 		for {
 			msg, err := hijackResp.Reader.ReadString('\n')
 			if err != nil {
+				close(msgChan)
 				if err != io.EOF {
-					dkr.logger.Errorf("(%s) Failed to read container output: %s", svcConfig.Name, err)
+					errChan <- errors.Wrap(err, "Failed to read container log message")
 				}
 				return
 			}
-			dkr.logger.Debugf("(%s) Read container output entry, sending to log", svcConfig.Name)
 			msgChan <- msg
 		}
 	}()
-	return msgChan, nil
+
+	return msgChan, errChan
 }
 
-func (dkr *Docker) RestartService(ctx context.Context, id string) error {
-	return nil
-}
+func (dkr *Docker) MonitorService(ctx context.Context, id string) (<-chan Event, <-chan error) {
+	transformedEvChan := make(chan Event, 20)
+	transformedErrChan := make(chan error, 1)
 
-func (dkr *Docker) StopService(ctx context.Context, id string) error {
-	return nil
+	evChan, errChan := dkr.client.Events(ctx, types.EventsOptions{
+		Filters: filters.NewArgs(filters.Arg("container", id)),
+	})
+	// Check for an error right away
+	select {
+	case err := <-errChan:
+		close(transformedEvChan)
+		transformedErrChan <- errors.Wrap(err,
+			fmt.Sprintf("Failed to initialize event monitor for container %s", id))
+	default:
+	}
+
+	go func() {
+		for {
+			select {
+			case event := <-evChan:
+				switch event.Action {
+				case "die":
+					transformedEvChan <- Die
+				default:
+				}
+			case err := <-errChan:
+				close(transformedEvChan)
+				transformedErrChan <- errors.Wrap(err,
+					fmt.Sprintf("Failed to retrieve log entry for container %s", id))
+			}
+		}
+	}()
+
+	return transformedEvChan, transformedErrChan
 }
 
 func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configuration) (string, error) {
-	dkr.logger.Debugf("(%s) Generating container build context", svcConfig.Name)
 	buildCtxt, err := generateBuildContext(svcConfig)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to generate Docker build context")
 	}
 
 	imgName := "spawnpoint_" + svcConfig.Name
-	dkr.logger.Debugf("(%s) Image Name: %s", svcConfig.Name, imgName)
 	_, err = dkr.client.ImageBuild(ctx, buildCtxt, types.ImageBuildOptions{
 		Tags:        []string{imgName},
 		NoCache:     true,
