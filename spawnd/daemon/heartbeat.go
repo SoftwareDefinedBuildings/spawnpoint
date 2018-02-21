@@ -27,21 +27,26 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 
 		default:
 			daemon.resourceLock.RLock()
+			availableCPU := daemon.availableCPUShares
+			availableMemory := daemon.availableMemory
+			daemon.resourceLock.RUnlock()
+			daemon.logger.Debug("Publishing daemon heartbeat")
+			daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.totalCPUShares,
+				availableMemory, daemon.totalMemory)
+
 			hb := heartbeat{
 				Alias:           daemon.alias,
 				Time:            time.Now().UnixNano(),
 				TotalCPU:        daemon.totalCPUShares,
 				TotalMemory:     daemon.totalMemory,
-				AvailableCPU:    daemon.availableCPUShares,
-				AvailableMemory: daemon.availableMemory,
+				AvailableCPU:    availableCPU,
+				AvailableMemory: availableMemory,
 			}
-			daemon.resourceLock.RUnlock()
 			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, hb)
 			if err != nil {
 				daemon.logger.Errorf("Failed to marshal heartbeat: %s", err)
 				goto end
 			}
-
 			if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
 				daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
 			}
