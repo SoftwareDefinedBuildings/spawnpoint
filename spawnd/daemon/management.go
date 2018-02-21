@@ -14,6 +14,11 @@ func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, 
 	var svc *runningService
 	defer close(done)
 	defer cancelFunc()
+	defer func() {
+		daemon.registryLock.Lock()
+		delete(daemon.serviceRegistry, svcConfig.Name)
+		daemon.registryLock.Unlock()
+	}()
 
 	for event := range events {
 		switch event {
@@ -93,10 +98,6 @@ func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, 
 			if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Removed service container"); err != nil {
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
 			}
-
-			daemon.registryLock.Lock()
-			delete(daemon.serviceRegistry, svcConfig.Name)
-			daemon.registryLock.Unlock()
 			return
 
 		case service.Die:
@@ -107,19 +108,31 @@ func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, 
 				restartInProgress = false
 				continue
 			}
-
 			if svc == nil {
 				daemon.logger.Criticalf("(%s) Encountered nil service manifest", svcConfig.Name)
 				return
 			}
-			if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-				daemon.logger.Errorf("(%s) Failed to remove service: %s", svcConfig.Name, err)
-			}
 
-			daemon.registryLock.Lock()
-			delete(daemon.serviceRegistry, svcConfig.Name)
-			daemon.registryLock.Unlock()
-			return
+			if svc.AutoRestart {
+				daemon.logger.Debugf("(%s) Auto-restart enabled, attempting service restart", svcConfig.Name)
+				if err := daemon.backend.RestartService(ctx, svc.ID); err != nil {
+					daemon.logger.Errorf("(%s) Failed to restart service: %s", svc.Name, err)
+					if err = daemon.publishLogMessage(svcConfig.Name, "[ERROR] Failed to restart service"); err != nil {
+						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+					}
+					return
+				}
+				if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Restarted service container"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				}
+				// Need to re-initialize container logging
+				go daemon.tailLogs(ctx, svc, false)
+			} else {
+				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
+					daemon.logger.Errorf("(%s) Failed to remove service: %s", svcConfig.Name, err)
+				}
+				return
+			}
 		}
 	}
 }

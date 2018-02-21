@@ -14,6 +14,11 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *runningServic
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	alive := true
 	pending := time.AfterFunc(1*time.Minute, func() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		daemon.logger.Debugf("(%s) Logging timeout has expired", svc.Name)
 		alive = false
 	})
