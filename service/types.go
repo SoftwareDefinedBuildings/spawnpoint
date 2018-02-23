@@ -27,4 +27,5 @@ const (
 	Restart = iota
 	Stop    = iota
 	Die     = iota
+	Adopt   = iota
 )

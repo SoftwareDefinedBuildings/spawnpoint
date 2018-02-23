@@ -16,6 +16,7 @@ import (
 )
 
 const heartbeatInterval = 10 * time.Second
+const persistenceInterval = 30 * time.Second
 
 type Config struct {
 	BW2Entity string `yaml:"bw2Entity"`
@@ -38,11 +39,11 @@ type SpawnpointDaemon struct {
 	availableCPUShares uint32
 	availableMemory    uint32
 	resourceLock       sync.RWMutex
-	serviceRegistry    map[string]*runningService
+	serviceRegistry    map[string]*serviceManifest
 	registryLock       sync.RWMutex
 }
 
-type runningService struct {
+type serviceManifest struct {
 	*service.Configuration
 	ID     string
 	Events chan service.Event
@@ -62,7 +63,7 @@ func New(config *Config, metadata *map[string]string, logger *logging.Logger) (*
 		totalMemory:        config.Memory,
 		availableCPUShares: config.CPUShares,
 		availableMemory:    config.Memory,
-		serviceRegistry:    make(map[string]*runningService),
+		serviceRegistry:    make(map[string]*serviceManifest),
 	}
 
 	if err := daemon.initBosswave(config); err != nil {
@@ -140,33 +141,42 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 		return
 	}
 
-	events := make(chan service.Event)
-	done := make(chan struct{})
-	go daemon.manageService(&svcConfig, events, done)
-	events <- service.Boot
+	svc := serviceManifest{Configuration: &svcConfig}
+	daemon.addService(&svc, true)
+}
 
-	bw2Iface := daemon.bw2Service.RegisterInterface(svcConfig.Name, "i.spawnable")
-	restartUnsubHandle, err := bw2Iface.SubscribeSlotH("restart", daemon.manipulateService(svcConfig.Name, "restart", done))
+func (daemon *SpawnpointDaemon) addService(svc *serviceManifest, boot bool) {
+	svc.Events = make(chan service.Event)
+	done := make(chan struct{})
+	go daemon.manageService(svc, done)
+	if boot {
+		svc.Events <- service.Boot
+	} else {
+		svc.Events <- service.Adopt
+	}
+
+	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
+	restartUnsubHandle, err := bw2Iface.SubscribeSlotH("restart", daemon.manipulateService(svc.Name, "restart", done))
 	if err != nil {
-		daemon.logger.Errorf("(%s) Failed to subscribe to restart slot: %s", svcConfig.Name, err)
+		daemon.logger.Errorf("(%s) Failed to subscribe to restart slot: %s", svc.Name, err)
 		return
 	}
-	stopUnsubHandle, err := bw2Iface.SubscribeSlotH("stop", daemon.manipulateService(svcConfig.Name, "stop", done))
+	stopUnsubHandle, err := bw2Iface.SubscribeSlotH("stop", daemon.manipulateService(svc.Name, "stop", done))
 	if err != nil {
-		daemon.logger.Errorf("(%s) Failed to subscribe to stop slot: %s", svcConfig.Name, err)
+		daemon.logger.Errorf("(%s) Failed to subscribe to stop slot: %s", svc.Name, err)
 		return
 	}
 	go func() {
 		<-done
 		if err := daemon.bw2Client.Unsubscribe(restartUnsubHandle); err != nil {
-			daemon.logger.Errorf("(%s) Failed to unsubscribe from restart slot", svcConfig.Name)
+			daemon.logger.Errorf("(%s) Failed to unsubscribe from restart slot", svc.Name)
 		} else {
-			daemon.logger.Debugf("(%s) Unsubscribed from restart slot", svcConfig.Name)
+			daemon.logger.Debugf("(%s) Unsubscribed from restart slot", svc.Name)
 		}
 		if err := daemon.bw2Client.Unsubscribe(stopUnsubHandle); err != nil {
-			daemon.logger.Errorf("(%s) Failed to unsubscribe from stop slot", svcConfig.Name)
+			daemon.logger.Errorf("(%s) Failed to unsubscribe from stop slot", svc.Name)
 		} else {
-			daemon.logger.Debugf("(%s) Unsubscribed from stop slot", svcConfig.Name)
+			daemon.logger.Debugf("(%s) Unsubscribed from stop slot", svc.Name)
 		}
 	}()
 }
@@ -206,7 +216,12 @@ func (daemon *SpawnpointDaemon) manipulateService(name string, operation string,
 
 func (daemon *SpawnpointDaemon) StartLoop(ctx context.Context) {
 	daemon.logger.Debugf("Spawnpoint Daemon Version %s -- starting main loop", util.VersionNum)
+	if err := daemon.recoverServices(ctx); err != nil {
+		daemon.logger.Errorf("Failed to recover from previous service snapshot: %s", err)
+	}
 	go daemon.publishHearbeats(ctx, heartbeatInterval)
+	go daemon.persistSnapshots(ctx, persistenceInterval)
+
 	<-ctx.Done()
 	daemon.logger.Debug("Main loop canceled -- terminating")
 }

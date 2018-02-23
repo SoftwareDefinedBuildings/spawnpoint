@@ -8,88 +8,106 @@ import (
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/backend"
 )
 
-func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, events chan service.Event, done chan<- struct{}) {
+func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- struct{}) {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	restartInProgress := false
-	var svc *runningService
 	defer close(done)
 	defer cancelFunc()
 
-	for event := range events {
+	for event := range svc.Events {
 		switch event {
 		case service.Boot:
-			daemon.logger.Debugf("(%s) State machine received service boot event", svcConfig.Name)
+			daemon.logger.Debugf("(%s) State machine received service boot event", svc.Name)
 
 			daemon.resourceLock.Lock()
-			if svcConfig.CPUShares <= daemon.availableCPUShares && svcConfig.Memory <= daemon.availableMemory {
-				daemon.logger.Debugf("(%s) Daemon has sufficient CPU and memory for new service", svcConfig.Name)
-				daemon.availableCPUShares -= svcConfig.CPUShares
-				daemon.availableMemory -= svcConfig.Memory
+			if svc.CPUShares <= daemon.availableCPUShares && svc.Memory <= daemon.availableMemory {
+				daemon.logger.Debugf("(%s) Daemon has sufficient CPU and memory for new service", svc.Name)
+				daemon.availableCPUShares -= svc.CPUShares
+				daemon.availableMemory -= svc.Memory
 				daemon.resourceLock.Unlock()
 
 				defer func() {
 					daemon.resourceLock.Lock()
-					daemon.availableCPUShares += svcConfig.CPUShares
-					daemon.availableMemory += svcConfig.Memory
+					daemon.availableCPUShares += svc.CPUShares
+					daemon.availableMemory += svc.Memory
 					daemon.resourceLock.Unlock()
 				}()
 			} else {
-				daemon.logger.Debugf("(%s) Has insufficient CPU and memory for new service, rejecting", svcConfig.Name)
+				daemon.logger.Debugf("(%s) Has insufficient CPU and memory for new service, rejecting", svc.Name)
 				msg := fmt.Sprintf("[ERROR] Insufficient resources for service. CPU: Have %v, Want %v. Mem: Have %v, Want %v",
-					daemon.availableCPUShares, svcConfig.CPUShares, daemon.availableMemory, svcConfig.Memory)
-				if err := daemon.publishLogMessage(svcConfig.Name, msg); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+					daemon.availableCPUShares, svc.CPUShares, daemon.availableMemory, svc.Memory)
+				if err := daemon.publishLogMessage(svc.Name, msg); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				daemon.resourceLock.Unlock()
 				return
 			}
 
-			daemon.logger.Debugf("(%s) Attempting to start new service", svcConfig.Name)
-			svcID, err := daemon.backend.StartService(ctx, svcConfig)
+			daemon.logger.Debugf("(%s) Attempting to start new service", svc.Name)
+			svcID, err := daemon.backend.StartService(ctx, svc.Configuration)
 			if err != nil {
-				daemon.logger.Errorf("(%s) Failed to start service: %s", svcConfig.Name, err)
-				if err = daemon.publishLogMessage(svcConfig.Name, fmt.Sprintf("[ERROR] Failed to start service: %s", err)); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				daemon.logger.Errorf("(%s) Failed to start service: %s", svc.Name, err)
+				if err = daemon.publishLogMessage(svc.Name, fmt.Sprintf("[ERROR] Failed to start service: %s", err)); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
 			}
-			daemon.logger.Debugf("(%s) Service started successfully", svcConfig.Name)
-			if err = daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Service container has started"); err != nil {
-				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+			daemon.logger.Debugf("(%s) Service started successfully", svc.Name)
+			if err = daemon.publishLogMessage(svc.Name, "[SUCCESS] Service container has started"); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 
-			svc = &runningService{
-				Configuration: svcConfig,
-				ID:            svcID,
-				Events:        events,
-			}
+			svc.ID = svcID
 			daemon.registryLock.Lock()
-			daemon.serviceRegistry[svcConfig.Name] = svc
+			daemon.serviceRegistry[svc.Name] = svc
 			daemon.registryLock.Unlock()
 			defer func() {
 				daemon.registryLock.Lock()
-				delete(daemon.serviceRegistry, svcConfig.Name)
+				delete(daemon.serviceRegistry, svc.Name)
 				daemon.registryLock.Unlock()
 			}()
 
 			go daemon.tailLogs(ctx, svc, true)
 			go daemon.monitorEvents(ctx, svc)
 
+		case service.Adopt:
+			daemon.logger.Debugf("(%s) State machine received service adopt event", svc.Name)
+			// Accept all previously running services without doing a quota check
+			daemon.resourceLock.Lock()
+			daemon.availableCPUShares -= svc.CPUShares
+			daemon.availableMemory -= svc.Memory
+			daemon.resourceLock.Unlock()
+
+			defer func() {
+				daemon.resourceLock.Lock()
+				daemon.availableCPUShares += svc.CPUShares
+				daemon.availableMemory += svc.Memory
+				daemon.resourceLock.Unlock()
+			}()
+
+			daemon.registryLock.Lock()
+			daemon.serviceRegistry[svc.Name] = svc
+			daemon.registryLock.Unlock()
+			defer func() {
+				daemon.registryLock.Lock()
+				delete(daemon.serviceRegistry, svc.Name)
+				daemon.registryLock.Unlock()
+			}()
+
+			go daemon.tailLogs(ctx, svc, false)
+			go daemon.monitorEvents(ctx, svc)
+
 		case service.Restart:
-			daemon.logger.Debugf("(%s) State machine received service restart event", svcConfig.Name)
-			if svc == nil {
-				daemon.logger.Criticalf("(%s) Encountered nil service manifest", svcConfig.Name)
-				return
-			}
+			daemon.logger.Debugf("(%s) State machine received service restart event", svc.Name)
 			if err := daemon.backend.RestartService(ctx, svc.ID); err != nil {
 				daemon.logger.Errorf("(%s) Failed to restart service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svcConfig.Name, "[ERROR] Failed to restart service"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to restart service"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
 			}
-			if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Restarted service container"); err != nil {
-				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Restarted service container"); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 
 			// Need to re-initialize container logging
@@ -98,64 +116,56 @@ func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, 
 			restartInProgress = true
 
 		case service.Stop:
-			daemon.logger.Debugf("(%s) State machine received service stop event", svcConfig.Name)
-			if svc == nil {
-				daemon.logger.Criticalf("(%s) Encountered nil service manifest", svcConfig.Name)
-				return
-			}
+			daemon.logger.Debugf("(%s) State machine received service stop event", svc.Name)
 			if err := daemon.backend.StopService(ctx, svc.ID); err != nil {
-				daemon.logger.Errorf("(%s) Failed to stop service: %s", svcConfig.Name, err)
-				if err = daemon.publishLogMessage(svcConfig.Name, "[ERROR] Failed to stop service"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				daemon.logger.Errorf("(%s) Failed to stop service: %s", svc.Name, err)
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to stop service"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
 			}
-			if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Stopped service container"); err != nil {
-				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Stopped service container"); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 
 			if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-				daemon.logger.Errorf("(%s) Failed to remove service: %s", svcConfig.Name, err)
-				if err = daemon.publishLogMessage(svcConfig.Name, "[ERROR] Failed to remove service"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
 			}
-			if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Removed service container"); err != nil {
-				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 			return
 
 		case service.Die:
-			daemon.logger.Debugf("(%s) State machine received die event", svcConfig.Name)
+			daemon.logger.Debugf("(%s) State machine received die event", svc.Name)
 			if restartInProgress {
 				// Service termination was part of a normal restart
-				daemon.logger.Debugf("(%s) This was part of a normal restart, ignoring", svcConfig.Name)
+				daemon.logger.Debugf("(%s) This was part of a normal restart, ignoring", svc.Name)
 				restartInProgress = false
 				continue
 			}
-			if svc == nil {
-				daemon.logger.Criticalf("(%s) Encountered nil service manifest", svcConfig.Name)
-				return
-			}
 
 			if svc.AutoRestart {
-				daemon.logger.Debugf("(%s) Auto-restart enabled, attempting service restart", svcConfig.Name)
+				daemon.logger.Debugf("(%s) Auto-restart enabled, attempting service restart", svc.Name)
 				if err := daemon.backend.RestartService(ctx, svc.ID); err != nil {
 					daemon.logger.Errorf("(%s) Failed to restart service: %s", svc.Name, err)
-					if err = daemon.publishLogMessage(svcConfig.Name, "[ERROR] Failed to restart service"); err != nil {
-						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to restart service"); err != nil {
+						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 					}
 					return
 				}
-				if err := daemon.publishLogMessage(svcConfig.Name, "[SUCCESS] Restarted service container"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svcConfig.Name, err)
+				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Restarted service container"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				// Need to re-initialize container logging
 				go daemon.tailLogs(ctx, svc, false)
 			} else {
 				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-					daemon.logger.Errorf("(%s) Failed to remove service: %s", svcConfig.Name, err)
+					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
 				}
 				return
 			}
@@ -163,7 +173,7 @@ func (daemon *SpawnpointDaemon) manageService(svcConfig *service.Configuration, 
 	}
 }
 
-func (daemon *SpawnpointDaemon) monitorEvents(ctx context.Context, svc *runningService) {
+func (daemon *SpawnpointDaemon) monitorEvents(ctx context.Context, svc *serviceManifest) {
 	eventChan, errChan := daemon.backend.MonitorService(context.Background(), svc.ID)
 	for event := range eventChan {
 		switch event {

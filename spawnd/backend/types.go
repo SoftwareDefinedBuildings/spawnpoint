@@ -11,6 +11,7 @@ type ServiceBackend interface {
 	RestartService(ctx context.Context, id string) error
 	StopService(ctx context.Context, id string) error
 	RemoveService(ctx context.Context, id string) error
+	ListServices(ctx context.Context) ([]string, error)
 	TailService(ctx context.Context, id string, log bool) (<-chan string, <-chan error)
 	MonitorService(ctx context.Context, id string) (<-chan Event, <-chan error)
 }

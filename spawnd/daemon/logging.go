@@ -9,7 +9,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *runningService, fromBeginning bool) {
+func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManifest, fromBeginning bool) {
 	logChan, errChan := daemon.backend.TailService(ctx, svc.ID, fromBeginning)
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	alive := true

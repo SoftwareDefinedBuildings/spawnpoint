@@ -178,6 +178,19 @@ func (dkr *Docker) MonitorService(ctx context.Context, id string) (<-chan Event,
 	return transformedEvChan, transformedErrChan
 }
 
+func (dkr *Docker) ListServices(ctx context.Context) ([]string, error) {
+	containers, err := dkr.client.ContainerList(ctx, types.ContainerListOptions{})
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to list running containers")
+	}
+
+	IDs := make([]string, len(containers))
+	for i, container := range containers {
+		IDs[i] = container.ID
+	}
+	return IDs, nil
+}
+
 func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configuration) (string, error) {
 	buildCtxt, err := generateBuildContext(svcConfig)
 	if err != nil {
