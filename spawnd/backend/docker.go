@@ -14,6 +14,8 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/volume"
 	docker "github.com/docker/docker/client"
 	"github.com/pkg/errors"
 )
@@ -63,12 +65,26 @@ func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configur
 		AttachStdout: true,
 	}
 
+	mounts, err := dkr.createMounts(ctx, svcConfig.Volumes)
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to create container volumes")
+	}
+	devices := make([]container.DeviceMapping, len(svcConfig.Devices))
+	for i, devicePath := range svcConfig.Devices {
+		devices[i] = container.DeviceMapping{
+			PathOnHost:        devicePath,
+			PathInContainer:   devicePath,
+			CgroupPermissions: "rwm",
+		}
+	}
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode("bridge"),
 		LogConfig:   container.LogConfig{Config: map[string]string{"max-size": "50m"}},
+		Mounts:      mounts,
 		Resources: container.Resources{
 			CPUShares: int64(svcConfig.CPUShares),
 			Memory:    int64(svcConfig.Memory * 1024 * 1024),
+			Devices:   devices,
 		},
 	}
 	if svcConfig.UseHostNet {
@@ -298,4 +314,35 @@ func generateBuildContext(config *service.Configuration) (io.Reader, error) {
 	}
 
 	return &buildCtxtBuffer, nil
+}
+
+func (dkr *Docker) createMounts(ctx context.Context, volumeNames []string) ([]mount.Mount, error) {
+	existingVolumesResp, err := dkr.client.VolumeList(ctx, filters.Args{})
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to list docker volumes")
+	}
+	existingVolumes := createVolumeNameSet(existingVolumesResp.Volumes)
+
+	mounts := make([]mount.Mount, len(volumeNames))
+	for i, volumeName := range volumeNames {
+		if _, ok := existingVolumes[volumeName]; !ok {
+			if _, err := dkr.client.VolumeCreate(ctx, volume.VolumesCreateBody{Name: volumeName}); err != nil {
+				return nil, errors.Wrap(err, "Failed to create Docker volume")
+			}
+		}
+		mounts[i] = mount.Mount{
+			Type:   mount.TypeVolume,
+			Source: volumeName,
+			Target: "/srv/" + volumeName,
+		}
+	}
+	return mounts, nil
+}
+
+func createVolumeNameSet(volumes []*types.Volume) map[string]struct{} {
+	retVal := make(map[string]struct{})
+	for _, volume := range volumes {
+		retVal[volume.Name] = struct{}{}
+	}
+	return retVal
 }

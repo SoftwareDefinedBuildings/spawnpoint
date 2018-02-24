@@ -13,6 +13,8 @@ type Configuration struct {
 	IncludedDirectories []string `yaml:"includedDirectories,omitempty"`
 	AutoRestart         bool     `yaml:"autoRestart,omitempty"`
 	UseHostNet          bool     `yaml:"useHostNet,omitempty"`
+	Volumes             []string `yaml:"volumes,omitempty"`
+	Devices             []string `yaml:"devices,omitempty"`
 }
 
 type LogMessage struct {

@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/gob"
-	"fmt"
 	"os"
 	"time"
 
