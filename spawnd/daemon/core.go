@@ -49,7 +49,7 @@ type serviceManifest struct {
 	Events chan service.Event
 }
 
-func New(config *Config, metadata *map[string]string, logger *logging.Logger) (*SpawnpointDaemon, error) {
+func New(config *Config, logger *logging.Logger) (*SpawnpointDaemon, error) {
 	if err := validateDaemonConfig(config); err != nil {
 		return nil, errors.Wrap(err, "Invalid daemon configuration")
 	}

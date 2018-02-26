@@ -29,11 +29,6 @@ func main() {
 					Usage: "Specify a configuration file for the daemon",
 					Value: "config.yml",
 				},
-				cli.StringFlag{
-					Name:  "metadata, m",
-					Usage: "Specify a file containing key/value metadata pairs",
-					Value: "",
-				},
 			},
 		},
 		{
@@ -66,19 +61,7 @@ func actionRun(c *cli.Context) error {
 		log.Fatalf("Failed to parse configuration YAML: %s", err)
 	}
 
-	var metadata map[string]string
-	metadataFile := c.String("metadata")
-	if len(metadataFile) > 0 {
-		metadataContents, err := ioutil.ReadFile(metadataFile)
-		if err != nil {
-			log.Fatalf("Failed to read metadata file %s: %s", metadataFile, err)
-		}
-		if err = yaml.Unmarshal(metadataContents, metadata); err != nil {
-			log.Fatalf("Failed to parse metadata YAML: %s", err)
-		}
-	}
-
-	spawnpointDaemon, err := daemon.New(&config, &metadata, log)
+	spawnpointDaemon, err := daemon.New(&config, log)
 	if err != nil {
 		log.Fatalf("Failed to initialize spawnd: %s", err)
 	}
@@ -98,7 +81,7 @@ func actionDecommission(c *cli.Context) error {
 		log.Fatalf("Failed to parse configuration YAML: %s", err)
 	}
 
-	spawnpointDaemon, err := daemon.New(&config, nil, log)
+	spawnpointDaemon, err := daemon.New(&config, log)
 	if err != nil {
 		log.Fatalf("Failed to initialize spawnd: %s", err)
 	}
