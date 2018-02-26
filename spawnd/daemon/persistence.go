@@ -18,7 +18,7 @@ func (daemon *SpawnpointDaemon) persistSnapshots(ctx context.Context, delay time
 		daemon.logger.Debug("Snapshotting running service state to file")
 		registryFile, err := os.Create(manifestFile)
 		if err != nil {
-			daemon.logger.Errorf("Failed to open service snapshot file: %s")
+			daemon.logger.Errorf("Failed to open service snapshot file: %s", err)
 			return
 		}
 

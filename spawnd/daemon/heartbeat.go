@@ -4,17 +4,20 @@ import (
 	"context"
 	"time"
 
+	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/util"
 	bw2 "github.com/immesys/bw2bind"
 	"github.com/pkg/errors"
 )
 
-type heartbeat struct {
+type Heartbeat struct {
 	Alias           string
+	Version         string
 	Time            int64
 	TotalMemory     uint32
 	TotalCPU        uint32
 	AvailableMemory uint32
 	AvailableCPU    uint32
+	Services        []string
 }
 
 func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time.Duration) {
@@ -34,24 +37,32 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 			daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.totalCPUShares,
 				availableMemory, daemon.totalMemory)
 
-			hb := heartbeat{
+			daemon.registryLock.RLock()
+			services := make([]string, len(daemon.serviceRegistry))
+			i := 0
+			for name := range daemon.serviceRegistry {
+				services[i] = name
+				i++
+			}
+			daemon.registryLock.RUnlock()
+
+			hb := Heartbeat{
 				Alias:           daemon.alias,
+				Version:         util.VersionNum,
 				Time:            time.Now().UnixNano(),
 				TotalCPU:        daemon.totalCPUShares,
 				TotalMemory:     daemon.totalMemory,
 				AvailableCPU:    availableCPU,
 				AvailableMemory: availableMemory,
+				Services:        services,
 			}
 			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, hb)
 			if err != nil {
 				daemon.logger.Errorf("Failed to marshal heartbeat: %s", err)
-				goto end
-			}
-			if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
+			} else if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
 				daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
 			}
 
-		end:
 			time.Sleep(delay)
 		}
 	}

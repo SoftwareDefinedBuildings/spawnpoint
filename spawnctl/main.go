@@ -6,11 +6,13 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"time"
 
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnclient"
+	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/daemon"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/util"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
@@ -66,7 +68,7 @@ func main() {
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:   "uri, u",
-					Usage:  "Bw2 URI of the host Spawnpoint",
+					Usage:  "BW2 URI of the host Spawnpoint",
 					Value:  "",
 					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
@@ -84,7 +86,7 @@ func main() {
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:   "uri, u",
-					Usage:  "Bw2 URI of the host Spawnpoint",
+					Usage:  "BW2 URI of the host Spawnpoint",
 					Value:  "",
 					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
@@ -102,13 +104,25 @@ func main() {
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:   "uri, u",
-					Usage:  "Bw2 URI of the host Spawnpoint",
+					Usage:  "BW2 URI of the host Spawnpoint",
 					Value:  "",
 					EnvVar: "SPAWNPOINT_DEFAULT_URI",
 				},
 				cli.StringFlag{
 					Name:  "name, n",
 					Usage: "Name of the service",
+					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "scan",
+			Usage:  "Scan a base URI for running Spawnpoints",
+			Action: actionScan,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "uri, u",
+					Usage: "Base BW2 URI to scan",
 					Value: "",
 				},
 			},
@@ -261,11 +275,53 @@ func manipulateService(c *cli.Context, command string) error {
 	return nil
 }
 
+func actionScan(c *cli.Context) error {
+	entity := c.GlobalString("entity")
+	if len(entity) == 0 {
+		fmt.Println("Missing 'entity' parameter")
+		os.Exit(1)
+	}
+	baseURI := fixBaseURI(c.String("uri"))
+	if len(baseURI) == 0 {
+		fmt.Println("Missing 'uri' parameter")
+		os.Exit(1)
+	}
+
+	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
+	if err != nil {
+		fmt.Printf("Could not create spawnpoint client: %s\n", err)
+		os.Exit(1)
+	}
+
+	heartbeats, err := spawnClient.Scan(baseURI)
+	if err != nil {
+		fmt.Printf("Scan failed: %s\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Discovered %v Spawnpoint(s)\n", len(heartbeats))
+	for uri, hb := range heartbeats {
+		printSpawnpointStatus(uri, &hb)
+	}
+
+	return nil
+}
+
 func fixURI(uri string) string {
 	if len(uri) > 0 && uri[len(uri)-1] == '/' {
 		return uri[:len(uri)-1]
 	}
 	return uri
+}
+
+func fixBaseURI(uri string) string {
+	if len(uri) == 0 {
+		return uri
+	} else if strings.HasSuffix(uri, "/*") {
+		return uri
+	} else if strings.HasSuffix(uri, "/") {
+		return uri + "*"
+	}
+	return uri + "/*"
 }
 
 func parseSvcConfig(configFile string) (*service.Configuration, error) {
@@ -280,4 +336,18 @@ func parseSvcConfig(configFile string) (*service.Configuration, error) {
 	}
 
 	return &svcConfig, nil
+}
+
+func printSpawnpointStatus(uri string, hb *daemon.Heartbeat) {
+	lastSeen := time.Unix(0, hb.Time)
+	duration := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
+
+	fmt.Printf("[%s] seen %s (%s) ago at %s\n", hb.Alias, lastSeen.Format(time.RFC822), duration.String(), uri)
+	fmt.Printf("Available CPU Shares: %v/%v\n", hb.AvailableCPU, hb.TotalCPU)
+	fmt.Printf("Available Memory: %v/%v\n", hb.AvailableMemory, hb.TotalMemory)
+
+	fmt.Printf("%v Running Service(s)\n", len(hb.Services))
+	for _, service := range hb.Services {
+		fmt.Printf("  • %s\n", service)
+	}
 }

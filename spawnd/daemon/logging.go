@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
@@ -13,6 +14,7 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 	logChan, errChan := daemon.backend.TailService(ctx, svc.ID, fromBeginning)
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	alive := true
+	aliveMut := sync.Mutex{}
 	pending := time.AfterFunc(1*time.Minute, func() {
 		select {
 		case <-ctx.Done():
@@ -20,7 +22,9 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 		default:
 		}
 		daemon.logger.Debugf("(%s) Logging timeout has expired", svc.Name)
+		aliveMut.Lock()
 		alive = false
+		aliveMut.Unlock()
 	})
 
 	keepAliveHandle, err := bw2Iface.SubscribeSlotH("keepLogAlive", func(msg *bw2.SimpleMessage) {
@@ -33,7 +37,9 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 		}
 		pending.Stop()
 		pending.Reset(1 * time.Minute)
+		aliveMut.Lock()
 		alive = true
+		aliveMut.Unlock()
 	})
 	if err != nil {
 		daemon.logger.Errorf("(%s) Failed to subscribe to log keep-alive slot: %s", svc.Name, err)
@@ -65,8 +71,9 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 				}
 			}
 
+			aliveMut.Lock()
 			if alive {
-				daemon.logger.Debugf("(%s) New log entry available, sending", svc.Name)
+				aliveMut.Unlock()
 				po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, service.LogMessage{
 					Contents:  message,
 					Timestamp: time.Now().UnixNano(),
@@ -79,7 +86,7 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 			} else {
-				daemon.logger.Debugf("(%s) New log entry available, but no active recipients", svc.Name)
+				aliveMut.Unlock()
 			}
 			break
 

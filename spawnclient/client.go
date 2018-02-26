@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
+	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/daemon"
 	bw2 "github.com/immesys/bw2bind"
 	"github.com/mholt/archiver"
 	"github.com/pkg/errors"
@@ -29,6 +30,34 @@ func New(router, entityFile string) (*SpawnClient, error) {
 	}
 
 	return &SpawnClient{bwClient: client}, nil
+}
+
+func (sc *SpawnClient) Scan(baseURI string) (map[string]daemon.Heartbeat, error) {
+	svcClient := sc.bwClient.NewServiceClient(baseURI, "s.spawnpoint")
+	iFaceClient := svcClient.AddInterface("daemon", "i.spawnpoint")
+	heartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
+		URI: iFaceClient.SignalURI("heartbeat"),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "Bosswave query failed")
+	}
+
+	spawnpoints := make(map[string]daemon.Heartbeat)
+	for msg := range heartbeatMsgs {
+		for _, po := range msg.POs {
+			if po.IsTypeDF(bw2.PODFSpawnpointHeartbeat) {
+				var hb daemon.Heartbeat
+				if err := po.(bw2.MsgPackPayloadObject).ValueInto(&hb); err != nil {
+					// Ignore this query result
+					continue
+				}
+				uri := msg.URI[:len(msg.URI)-len("/s.spawnpoint/daemon/i.spawnpoint/signal/heartbeat")]
+				spawnpoints[uri] = hb
+			}
+		}
+	}
+
+	return spawnpoints, nil
 }
 
 func (sc *SpawnClient) Deploy(config *service.Configuration, uri string) error {
