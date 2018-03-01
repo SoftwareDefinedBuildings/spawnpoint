@@ -109,7 +109,7 @@ func (daemon *SpawnpointDaemon) initBosswave(config *Config) error {
 		return errors.Wrap(err, "Failed to set Bosswave entity")
 	}
 
-	service := client.RegisterService(config.Path, "s.spawnpoint")
+	service := client.RegisterServiceNoHb(config.Path, "s.spawnpoint")
 	service.SetErrorHandler(func(err error) {
 		daemon.logger.Errorf("Failed to register service metadata: %s", err)
 	})
