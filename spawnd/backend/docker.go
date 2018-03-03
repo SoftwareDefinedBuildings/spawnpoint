@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"path/filepath"
 	"strings"
 
@@ -20,7 +21,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const defaultSpawnpointImage = "jhkolb/spawnpoint:amd64"
+const defaultSpawnpointImage = "jhkolb/spawnable:amd64"
 const logMaxSize = "50m"
 
 type Docker struct {
@@ -214,7 +215,7 @@ func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configurat
 	}
 
 	imgName := "spawnpoint_" + svcConfig.Name
-	_, err = dkr.client.ImageBuild(ctx, buildCtxt, types.ImageBuildOptions{
+	resp, err := dkr.client.ImageBuild(ctx, buildCtxt, types.ImageBuildOptions{
 		Tags:        []string{imgName},
 		NoCache:     true,
 		Context:     buildCtxt,
@@ -225,6 +226,10 @@ func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configurat
 	if err != nil {
 		return "", errors.Wrap(err, "Daemon failed to build image")
 	}
+	defer resp.Body.Close()
+	// We have to do this for an image build to actually occur
+	ioutil.ReadAll(resp.Body)
+
 	return imgName, nil
 }
 
