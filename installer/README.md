@@ -37,9 +37,3 @@ This script will then take the following steps:
        this should be 1024 shares per core.
   7. Start up the new `spawnd` service, after enabling it to start on boot as
      well.
-
-### What about host networking and mapping devices?
-In general, allowing containers to use the host network or to directly access
-host devices is discouraged unless you know what you are doing. Therefore, it is
-disabled by the installer by default, but the installer will not change your old
-settings when performing an update.
