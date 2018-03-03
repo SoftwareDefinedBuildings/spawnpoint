@@ -22,13 +22,14 @@ type Heartbeat struct {
 
 func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time.Duration) {
 	bw2Iface := daemon.bw2Service.RegisterInterface("daemon", "i.spawnpoint")
+	tick := time.Tick(delay)
 	for {
 		select {
 		case <-ctx.Done():
 			daemon.logger.Debug("Terminating daemon heartbeat publication")
 			return
 
-		default:
+		case <-tick:
 			daemon.resourceLock.RLock()
 			availableCPU := daemon.availableCPUShares
 			availableMemory := daemon.availableMemory
@@ -62,8 +63,6 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 			} else if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
 				daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
 			}
-
-			time.Sleep(delay)
 		}
 	}
 }

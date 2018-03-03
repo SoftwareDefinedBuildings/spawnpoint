@@ -4,6 +4,8 @@ import (
 	"context"
 	"io/ioutil"
 	"os"
+	"os/signal"
+	"syscall"
 
 	yaml "gopkg.in/yaml.v2"
 
@@ -65,7 +67,16 @@ func actionRun(c *cli.Context) error {
 	if err != nil {
 		log.Fatalf("Failed to initialize spawnd: %s", err)
 	}
-	spawnpointDaemon.StartLoop(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	go func() {
+		<-sigCh
+		cancelFunc()
+	}()
+
+	spawnpointDaemon.StartLoop(ctx)
 	return nil
 }
 

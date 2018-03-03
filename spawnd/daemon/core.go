@@ -219,9 +219,17 @@ func (daemon *SpawnpointDaemon) StartLoop(ctx context.Context) {
 	if err := daemon.recoverServices(ctx); err != nil {
 		daemon.logger.Errorf("Failed to recover from previous service snapshot: %s", err)
 	}
-	go daemon.publishHearbeats(ctx, heartbeatInterval)
-	go daemon.persistSnapshots(ctx, persistenceInterval)
 
-	<-ctx.Done()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		daemon.publishHearbeats(ctx, heartbeatInterval)
+		wg.Done()
+	}()
+	go func() {
+		daemon.persistSnapshots(ctx, persistenceInterval)
+		wg.Done()
+	}()
+	wg.Wait()
 	daemon.logger.Debug("Main loop canceled -- terminating")
 }
