@@ -10,7 +10,6 @@ import (
 )
 
 type Heartbeat struct {
-	Alias           string
 	Version         string
 	Time            int64
 	TotalMemory     uint64
@@ -56,7 +55,6 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 			daemon.registryLock.RUnlock()
 
 			hb := Heartbeat{
-				Alias:           daemon.alias,
 				Version:         util.VersionNum,
 				Time:            time.Now().UnixNano(),
 				TotalCPU:        daemon.totalCPUShares,
@@ -111,7 +109,7 @@ func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, sv
 
 func (daemon *SpawnpointDaemon) Decommission() error {
 	bw2Iface := daemon.bw2Service.RegisterInterface("daemon", "i.spawnpoint")
-	daemon.logger.Debugf("Decomissioning spawnpoint %s", daemon.alias)
+	daemon.logger.Debugf("Decomissioning spawnpoint %s", daemon.path)
 	// A message without any POs is effectively a metadata de-persist
 	if err := bw2Iface.PublishSignal("heartbeat"); err != nil {
 		daemon.logger.Errorf("Failed to publish de-persist message: %s", err)

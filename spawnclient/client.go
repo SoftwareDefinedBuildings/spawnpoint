@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"io/ioutil"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
@@ -58,6 +59,48 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]daemon.Heartbeat, error)
 	}
 
 	return spawnpoints, nil
+}
+
+func (sc *SpawnClient) Inspect(uri string) (*daemon.Heartbeat, map[string]daemon.ServiceHeartbeat, error) {
+	daemonHbs, err := sc.Scan(uri)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "Initial spawnpoint scan failed")
+	} else if len(daemonHbs) == 0 {
+		return nil, nil, errors.New("No spawnpoints found at URI")
+	} else if len(daemonHbs) > 1 {
+		return nil, nil, errors.New("Multiple spawnpoints found at URI")
+	}
+	// This loop is guaranteed to iterate just once
+	var daemonHb daemon.Heartbeat
+	for _, hb := range daemonHbs {
+		daemonHb = hb
+	}
+
+	svcClient := sc.bwClient.RegisterService(uri, "s.spawnpoint")
+	iFaceClient := svcClient.RegisterInterface("+", "i.spawnable")
+	svcHeartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
+		URI: iFaceClient.SignalURI("heartbeat"),
+	})
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "Bosswave query failed")
+	}
+	svcHeartbeats := make(map[string]daemon.ServiceHeartbeat)
+	for svcHbMsg := range svcHeartbeatMsgs {
+		for _, po := range svcHbMsg.POs {
+			if po.IsTypeDF(bw2.PODFSpawnpointSvcHb) {
+				var svcHb daemon.ServiceHeartbeat
+				if err := po.(bw2.MsgPackPayloadObject).ValueInto(&svcHb); err != nil {
+					// Ignore this query result
+					continue
+				}
+				tokens := strings.Split(svcHbMsg.URI, "/")
+				svcName := tokens[len(tokens)-4]
+				svcHeartbeats[svcName] = svcHb
+			}
+		}
+	}
+
+	return &daemonHb, svcHeartbeats, nil
 }
 
 func (sc *SpawnClient) Deploy(config *service.Configuration, uri string) error {

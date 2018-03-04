@@ -44,6 +44,9 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			}
 
 			daemon.logger.Debugf("(%s) Attempting to start new service", svc.Name)
+			if err := daemon.publishLogMessage(svc.Name, "[INFO] Launching service..."); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+			}
 			svcID, err := daemon.backend.StartService(ctx, svc.Configuration)
 			if err != nil {
 				daemon.logger.Errorf("(%s) Failed to start service: %s", svc.Name, err)
