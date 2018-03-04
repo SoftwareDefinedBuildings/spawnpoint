@@ -69,6 +69,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 
 			go daemon.tailLogs(ctx, svc, true)
 			go daemon.monitorEvents(ctx, svc)
+			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval)
 
 		case service.Adopt:
 			daemon.logger.Debugf("(%s) State machine received service adopt event", svc.Name)
@@ -96,6 +97,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 
 			go daemon.tailLogs(ctx, svc, false)
 			go daemon.monitorEvents(ctx, svc)
+			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval)
 
 		case service.Restart:
 			daemon.logger.Debugf("(%s) State machine received service restart event", svc.Name)
@@ -187,7 +189,7 @@ func (daemon *SpawnpointDaemon) monitorEvents(ctx context.Context, svc *serviceM
 	}
 	select {
 	case err := <-errChan:
-		fmt.Printf("(%s) Error while monitoring docker events: %s", svc.Name, err)
+		daemon.logger.Errorf("(%s) Error while monitoring docker events: %s", svc.Name, err)
 	default:
 	}
 }

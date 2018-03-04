@@ -22,8 +22,8 @@ type Config struct {
 	BW2Entity string `yaml:"bw2Entity"`
 	BW2Agent  string `yaml:"bw2Agent"`
 	Path      string `yaml:"path"`
-	CPUShares uint32 `yaml:"cpuShares"`
-	Memory    uint32 `yaml:"memory"`
+	CPUShares uint64 `yaml:"cpuShares"`
+	Memory    uint64 `yaml:"memory"`
 	Backend   string `yaml:"backend"`
 }
 
@@ -34,10 +34,10 @@ type SpawnpointDaemon struct {
 	logger             *logging.Logger
 	path               string
 	alias              string
-	totalCPUShares     uint32
-	totalMemory        uint32
-	availableCPUShares uint32
-	availableMemory    uint32
+	totalCPUShares     uint64
+	totalMemory        uint64
+	availableCPUShares uint64
+	availableMemory    uint64
 	resourceLock       sync.RWMutex
 	serviceRegistry    map[string]*serviceManifest
 	registryLock       sync.RWMutex

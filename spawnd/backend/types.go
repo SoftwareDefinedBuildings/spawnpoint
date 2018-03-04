@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 )
@@ -14,6 +15,7 @@ type ServiceBackend interface {
 	ListServices(ctx context.Context) ([]string, error)
 	TailService(ctx context.Context, id string, log bool) (<-chan string, <-chan error)
 	MonitorService(ctx context.Context, id string) (<-chan Event, <-chan error)
+	ProfileService(ctx context.Context, id string, period time.Duration) (<-chan Stats, <-chan error)
 }
 
 type Event int
@@ -21,3 +23,8 @@ type Event int
 const (
 	Die = iota
 )
+
+type Stats struct {
+	Memory    float64
+	CPUShares float64
+}

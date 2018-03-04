@@ -5,8 +5,8 @@ type Configuration struct {
 	BaseImage           string   `yaml:"image"`
 	Source              string   `yaml:"source"`
 	BW2Entity           string   `yaml:"bw2Entity"`
-	CPUShares           uint32   `yaml:"cpuShares"`
-	Memory              uint32   `yaml:"memory"`
+	CPUShares           uint64   `yaml:"cpuShares"`
+	Memory              uint64   `yaml:"memory"`
 	Build               []string `yaml:"build,omitempty"`
 	Run                 []string `yaml:"run"`
 	IncludedFiles       []string `yaml:"includedFiles,omitempty"`

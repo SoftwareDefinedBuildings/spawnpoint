@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/docker/docker/api/types"
@@ -23,11 +25,33 @@ import (
 
 const defaultSpawnpointImage = "jhkolb/spawnable:amd64"
 const logMaxSize = "50m"
+const cpuSharesPerCore = 1024
 
 type Docker struct {
 	Alias     string
 	bw2Router string
 	client    *docker.Client
+}
+
+type dockerStatsResponse struct {
+	Read     time.Time `json:"read"`
+	PreRead  time.Time `json:"preread"`
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+		OnlineCPUs     uint64 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	PreCPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+	} `json:"precpu_stats"`
+	MemoryStats struct {
+		Usage uint64 `json:"usage"`
+	} `json:"memory_stats"`
 }
 
 func NewDocker(alias, bw2Router string) (*Docker, error) {
@@ -206,6 +230,60 @@ func (dkr *Docker) ListServices(ctx context.Context) ([]string, error) {
 		IDs[i] = container.ID
 	}
 	return IDs, nil
+}
+
+func (dkr *Docker) ProfileService(ctx context.Context, id string, period time.Duration) (<-chan Stats, <-chan error) {
+	statChan := make(chan Stats, 10)
+	errChan := make(chan error, 1)
+	response, err := dkr.client.ContainerStats(ctx, id, true)
+	if err != nil {
+		close(statChan)
+		errChan <- errors.Wrap(err, "Failed to initialize container stat collection")
+		return statChan, errChan
+	}
+
+	go func() {
+		defer response.Body.Close()
+		decoder := json.NewDecoder(response.Body)
+		lastEmitted := time.Now()
+		lastCPUCores := 0.0
+		for {
+			select {
+			case <-ctx.Done():
+				close(statChan)
+				return
+			default:
+				var statEntry dockerStatsResponse
+				if err := decoder.Decode(&statEntry); err != nil {
+					close(statChan)
+					if err != io.EOF {
+						errChan <- errors.Wrap(err, "Failed to read and decode container stats entry")
+					}
+					return
+				}
+				if statEntry.Read.Sub(lastEmitted) > period {
+					lastEmitted = time.Now()
+
+					// Logic is based on Docker's `calculateCPUPercent` function
+					containerCPUDelta := float64(statEntry.CPUStats.CPUUsage.TotalUsage -
+						statEntry.PreCPUStats.CPUUsage.TotalUsage)
+					systemCPUDelta := float64(statEntry.CPUStats.SystemCPUUsage -
+						statEntry.PreCPUStats.SystemCPUUsage)
+					if systemCPUDelta > 0.0 {
+						numCores := float64(statEntry.CPUStats.OnlineCPUs)
+						lastCPUCores = (containerCPUDelta / systemCPUDelta) * numCores
+					}
+
+					statChan <- Stats{
+						Memory:    float64(statEntry.MemoryStats.Usage) / (1024.0 * 1024.0),
+						CPUShares: lastCPUCores * cpuSharesPerCore,
+					}
+				}
+			}
+		}
+	}()
+
+	return statChan, errChan
 }
 
 func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configuration) (string, error) {

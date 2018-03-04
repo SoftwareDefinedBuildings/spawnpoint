@@ -13,11 +13,19 @@ type Heartbeat struct {
 	Alias           string
 	Version         string
 	Time            int64
-	TotalMemory     uint32
-	TotalCPU        uint32
-	AvailableMemory uint32
-	AvailableCPU    uint32
+	TotalMemory     uint64
+	TotalCPU        uint64
+	AvailableMemory uint64
+	AvailableCPU    uint64
 	Services        []string
+}
+
+type ServiceHeartbeat struct {
+	Time          int64
+	Memory        uint64
+	CPUShares     uint64
+	UsedMemory    float64
+	UsedCPUShares float64
 }
 
 func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time.Duration) {
@@ -64,6 +72,40 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 				daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
 			}
 		}
+	}
+}
+
+func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, svc *serviceManifest, period time.Duration) {
+	statChan, errChan := daemon.backend.ProfileService(ctx, svc.ID, period)
+	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
+	for stats := range statChan {
+		daemon.logger.Debugf("(%s) Publishing service heartbeat", svc.Name)
+		daemon.logger.Debugf("(%s) CPU Shares: ~%.2f/%d, Memory: %.2f/%d", svc.Name,
+			stats.CPUShares, svc.CPUShares, stats.Memory, svc.Memory)
+		svcHb := ServiceHeartbeat{
+			Time:          time.Now().UnixNano(),
+			Memory:        svc.Memory,
+			CPUShares:     svc.CPUShares,
+			UsedMemory:    stats.Memory,
+			UsedCPUShares: stats.CPUShares,
+		}
+
+		po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointSvcHb, svcHb)
+		if err != nil {
+			daemon.logger.Errorf("(%s) Failed to marshal service heartbeat: %s", svc.Name, err)
+			continue
+		}
+
+		if err := bw2Iface.PublishSignal("heartbeat", po); err != nil {
+			daemon.logger.Errorf("(%s) Failed to publish service heartbeat: %s", svc.Name, err)
+		}
+	}
+	daemon.logger.Debugf("(%s) Service heartbeat publication terminated", svc.Name)
+
+	select {
+	case err := <-errChan:
+		daemon.logger.Errorf("(%s) Error while profiling service: %s", svc.Name, err)
+	default:
 	}
 }
 
