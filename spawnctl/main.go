@@ -12,11 +12,12 @@ import (
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnclient"
-	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/daemon"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/util"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
 )
+
+const deploymentHistVar = "SPAWNCTL_HISTORY_FILE"
 
 func main() {
 	app := cli.NewApp()
@@ -63,6 +64,17 @@ func main() {
 					Name:  "timeout, t",
 					Usage: "Timeout duration (optional)",
 					Value: "",
+				},
+			},
+		},
+		{
+			Name:   "deploy-last",
+			Usage:  "Run the last deploy command executed from the current working directory",
+			Action: actionDeployLast,
+			Flags: []cli.Flag{
+				cli.BoolFlag{
+					Name:  "yes, y",
+					Usage: "Skip deployment confirmation",
 				},
 			},
 		},
@@ -196,6 +208,19 @@ func actionDeploy(c *cli.Context) error {
 			fmt.Println("Timeout duration must be positive")
 			os.Exit(1)
 		}
+	}
+
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Warning: Unable to get current working directory to save info for deploy-last")
+	} else if err = saveDeployment(currentDir, deployment{
+		BW2Entity:     entity,
+		URI:           spawnpointURI,
+		Name:          svcName,
+		Configuration: cfgFile,
+		Timeout:       timeoutStr,
+	}, getDeploymentHistoryFile()); err != nil {
+		fmt.Println("Warning: Failed to save deployment info for deploy-last")
 	}
 
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
@@ -422,40 +447,4 @@ func parseSvcConfig(configFile string) (*service.Configuration, error) {
 	}
 
 	return &svcConfig, nil
-}
-
-func printSpawnpointStatus(uri string, hb *daemon.Heartbeat) {
-	tokens := strings.Split(uri, "/")
-	alias := tokens[len(tokens)-1]
-	lastSeen := time.Unix(0, hb.Time)
-	duration := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
-
-	fmt.Printf("[%s] seen %s (%s) ago at %s\n", alias, lastSeen.Format(time.RFC822), duration.String(), uri)
-	fmt.Printf("Available CPU Shares: %v/%v\n", hb.AvailableCPU, hb.TotalCPU)
-	fmt.Printf("Available Memory: %v/%v\n", hb.AvailableMemory, hb.TotalMemory)
-
-	fmt.Printf("%v Running Service(s)\n", len(hb.Services))
-	for _, service := range hb.Services {
-		fmt.Printf("  • %s\n", service)
-	}
-}
-
-func printSpawnpointDetails(uri string, daemonHb *daemon.Heartbeat, svcHbs map[string]daemon.ServiceHeartbeat) {
-	tokens := strings.Split(uri, "/")
-	alias := tokens[len(tokens)-1]
-	lastSeen := time.Unix(0, daemonHb.Time)
-	duration := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
-
-	fmt.Printf("[%s] seen %s (%s) ago at %s\n", alias, lastSeen.Format(time.RFC822), duration.String(), uri)
-	fmt.Printf("Available CPU Shares: %v/%v\n", daemonHb.AvailableCPU, daemonHb.TotalCPU)
-	fmt.Printf("Available Memory: %v/%v\n", daemonHb.AvailableMemory, daemonHb.TotalMemory)
-
-	fmt.Printf("%v Running Service(s)\n", len(daemonHb.Services))
-	for name, svcHb := range svcHbs {
-		lastSeen := time.Unix(0, svcHb.Time)
-		duration := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
-		fmt.Printf("• [%s] seen %s (%s) ago.\n", name, lastSeen.Format(time.RFC822), duration.String())
-		fmt.Printf("  CPU: ~%.2f/%d Shares. Memory: %.2f/%d MiB\n", svcHb.UsedCPUShares, svcHb.CPUShares,
-			svcHb.UsedMemory, svcHb.Memory)
-	}
 }
