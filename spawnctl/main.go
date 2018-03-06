@@ -18,7 +18,7 @@ import (
 )
 
 const deploymentHistVar = "SPAWNCTL_HISTORY_FILE"
-const healthHorizon = 5 * time.Minute
+const healthHorizon = 2 * time.Minute
 
 func main() {
 	app := cli.NewApp()
@@ -344,6 +344,18 @@ func manipulateService(c *cli.Context, command string) error {
 		fmt.Printf("Last seen %s ago\n", age.String())
 		os.Exit(1)
 	}
+	age, err = checkServiceHealth(spawnClient, spawnpointURI, svcName)
+	if err != nil {
+		fmt.Printf("Failed to check service health: %s\n", err)
+		os.Exit(1)
+	} else if age == 0 {
+		fmt.Printf("Service %s does not exist at spawnpoint %s\n", svcName, spawnpointURI)
+		os.Exit(1)
+	} else if age > healthHorizon {
+		fmt.Printf("Service %s is not running\n", svcName)
+		fmt.Printf("Last seen %s ago\n", age.String())
+		os.Exit(1)
+	}
 
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -488,5 +500,19 @@ func checkSpawnpointHealth(sc *spawnclient.Client, uri string) (time.Duration, e
 
 	daemonTimestamp := time.Unix(0, daemonHb.Time)
 	duration := time.Now().Sub(daemonTimestamp)
+	return duration, nil
+}
+
+func checkServiceHealth(sc *spawnclient.Client, uri string, svcName string) (time.Duration, error) {
+	_, svcHbs, err := sc.Inspect(uri)
+	if err != nil {
+		return 0, errors.Wrap(err, "Failed to inspect spawnpoint")
+	}
+	svcHb, ok := svcHbs[svcName]
+	if !ok {
+		return 0, nil
+	}
+	svcTimestamp := time.Unix(0, svcHb.Time)
+	duration := time.Now().Sub(svcTimestamp)
 	return duration, nil
 }

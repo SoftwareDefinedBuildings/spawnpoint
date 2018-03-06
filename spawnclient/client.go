@@ -89,8 +89,8 @@ func (sc *Client) Inspect(uri string) (*daemon.Heartbeat, map[string]daemon.Serv
 		daemonHb = hb
 	}
 
-	svcClient := sc.bwClient.RegisterService(uri, "s.spawnpoint")
-	iFaceClient := svcClient.RegisterInterface("+", "i.spawnable")
+	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
+	iFaceClient := svcClient.AddInterface("+", "i.spawnable")
 	svcHeartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
 		URI: iFaceClient.SignalURI("heartbeat"),
 	})
