@@ -18,6 +18,7 @@ import (
 )
 
 const deploymentHistVar = "SPAWNCTL_HISTORY_FILE"
+const healthHorizon = 5 * time.Minute
 
 func main() {
 	app := cli.NewApp()
@@ -226,6 +227,19 @@ func actionDeploy(c *cli.Context) error {
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
 		fmt.Printf("Could not create spawnpoint client: %s\n", err)
+		os.Exit(1)
+	}
+	age, err := checkSpawnpointHealth(spawnClient, spawnpointURI)
+	if err != nil {
+		fmt.Printf("Failed to check spawnpoint health: %s\n", err)
+		os.Exit(1)
+	} else if age == 0 {
+		fmt.Printf("No spawnpoint exists at %s\n", spawnpointURI)
+		os.Exit(1)
+	} else if age > healthHorizon {
+		fmt.Printf("Spawnpoint at %s appears to be down\n", spawnpointURI)
+		fmt.Printf("Last seen %s ago\n", age.String())
+		os.Exit(1)
 	}
 
 	var ctx context.Context
@@ -316,6 +330,19 @@ func manipulateService(c *cli.Context, command string) error {
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
 		fmt.Printf("Could not create spawnpoint client: %s\n", err)
+		os.Exit(1)
+	}
+	age, err := checkSpawnpointHealth(spawnClient, spawnpointURI)
+	if err != nil {
+		fmt.Printf("Failed to check spawnpoint health: %s\n", err)
+		os.Exit(1)
+	} else if age == 0 {
+		fmt.Printf("No spawnpoint exists at %s\n", spawnpointURI)
+		os.Exit(1)
+	} else if age > healthHorizon {
+		fmt.Printf("Spawnpoint at %s appears to be down\n", spawnpointURI)
+		fmt.Printf("Last seen %s ago\n", age.String())
+		os.Exit(1)
 	}
 
 	var ctx context.Context
@@ -447,4 +474,19 @@ func parseSvcConfig(configFile string) (*service.Configuration, error) {
 	}
 
 	return &svcConfig, nil
+}
+
+func checkSpawnpointHealth(sc *spawnclient.Client, uri string) (time.Duration, error) {
+	spawnpoints, err := sc.Scan(uri)
+	if err != nil {
+		return 0, errors.Wrap(err, "Failed to scan for spawnpoint at URI")
+	}
+	daemonHb, ok := spawnpoints[uri]
+	if !ok {
+		return 0, nil
+	}
+
+	daemonTimestamp := time.Unix(0, daemonHb.Time)
+	duration := time.Now().Sub(daemonTimestamp)
+	return duration, nil
 }

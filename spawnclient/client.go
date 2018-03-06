@@ -16,11 +16,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-type SpawnClient struct {
+type Client struct {
 	bwClient *bw2.BW2Client
 }
 
-func New(router, entityFile string) (*SpawnClient, error) {
+func New(router, entityFile string) (*Client, error) {
 	bw2.SilenceLog()
 	client, err := bw2.Connect(router)
 	if err != nil {
@@ -30,10 +30,18 @@ func New(router, entityFile string) (*SpawnClient, error) {
 		return nil, errors.Wrap(err, "Failed to set BW2 entity file")
 	}
 
-	return &SpawnClient{bwClient: client}, nil
+	return &Client{bwClient: client}, nil
 }
 
-func (sc *SpawnClient) Scan(baseURI string) (map[string]daemon.Heartbeat, error) {
+func (sc *Client) Scan(baseURI string) (map[string]daemon.Heartbeat, error) {
+	namespace := strings.Split(baseURI, "/")[0]
+	vk, _, err := sc.bwClient.ResolveLongAlias(namespace)
+	aliased := (err == nil)
+	var encodedVk string
+	if aliased {
+		encodedVk = base64.URLEncoding.EncodeToString(vk)
+	}
+
 	svcClient := sc.bwClient.NewServiceClient(baseURI, "s.spawnpoint")
 	iFaceClient := svcClient.AddInterface("daemon", "i.spawnpoint")
 	heartbeatMsgs, err := sc.bwClient.Query(&bw2.QueryParams{
@@ -52,8 +60,13 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]daemon.Heartbeat, error)
 					// Ignore this query result
 					continue
 				}
-				uri := msg.URI[:len(msg.URI)-len("/s.spawnpoint/daemon/i.spawnpoint/signal/heartbeat")]
-				spawnpoints[uri] = hb
+				rawURI := msg.URI[:len(msg.URI)-len("/s.spawnpoint/daemon/i.spawnpoint/signal/heartbeat")]
+				if aliased {
+					convertedURI := strings.Replace(rawURI, encodedVk, namespace, 1)
+					spawnpoints[convertedURI] = hb
+				} else {
+					spawnpoints[rawURI] = hb
+				}
 			}
 		}
 	}
@@ -61,7 +74,7 @@ func (sc *SpawnClient) Scan(baseURI string) (map[string]daemon.Heartbeat, error)
 	return spawnpoints, nil
 }
 
-func (sc *SpawnClient) Inspect(uri string) (*daemon.Heartbeat, map[string]daemon.ServiceHeartbeat, error) {
+func (sc *Client) Inspect(uri string) (*daemon.Heartbeat, map[string]daemon.ServiceHeartbeat, error) {
 	daemonHbs, err := sc.Scan(uri)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Initial spawnpoint scan failed")
@@ -103,7 +116,7 @@ func (sc *SpawnClient) Inspect(uri string) (*daemon.Heartbeat, map[string]daemon
 	return &daemonHb, svcHeartbeats, nil
 }
 
-func (sc *SpawnClient) Deploy(config *service.Configuration, uri string) error {
+func (sc *Client) Deploy(config *service.Configuration, uri string) error {
 	if err := validateConfig(config); err != nil {
 		return errors.Wrap(err, "Invalid service configuration")
 	}
@@ -135,7 +148,7 @@ func (sc *SpawnClient) Deploy(config *service.Configuration, uri string) error {
 	return nil
 }
 
-func (sc *SpawnClient) Stop(uri string, svcName string) error {
+func (sc *Client) Stop(uri string, svcName string) error {
 	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
 	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
 	if err := iFaceClient.PublishSlot("stop"); err != nil {
@@ -144,7 +157,7 @@ func (sc *SpawnClient) Stop(uri string, svcName string) error {
 	return nil
 }
 
-func (sc *SpawnClient) Restart(uri string, svcName string) error {
+func (sc *Client) Restart(uri string, svcName string) error {
 	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
 	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
 	if err := iFaceClient.PublishSlot("restart"); err != nil {
@@ -153,7 +166,7 @@ func (sc *SpawnClient) Restart(uri string, svcName string) error {
 	return nil
 }
 
-func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-chan service.LogMessage, <-chan error) {
+func (sc *Client) Tail(ctx context.Context, svcName string, uri string) (<-chan service.LogMessage, <-chan error) {
 	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
 	iFaceClient := svcClient.AddInterface(svcName, "i.spawnable")
 	errChan := make(chan error, 1)
