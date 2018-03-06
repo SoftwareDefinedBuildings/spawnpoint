@@ -59,6 +59,11 @@ func main() {
 					Usage: "Name of the service",
 					Value: "",
 				},
+				cli.StringFlag{
+					Name:  "timeout, t",
+					Usage: "Timeout duration (optional)",
+					Value: "",
+				},
 			},
 		},
 		{
@@ -75,6 +80,11 @@ func main() {
 				cli.StringFlag{
 					Name:  "name, n",
 					Usage: "Name of the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "timeout, t",
+					Usage: "Timeout duration (optional)",
 					Value: "",
 				},
 			},
@@ -95,6 +105,11 @@ func main() {
 					Usage: "Name of the service",
 					Value: "",
 				},
+				cli.StringFlag{
+					Name:  "timeout, t",
+					Usage: "Timeout duration (optional)",
+					Value: "",
+				},
 			},
 		},
 		{
@@ -111,6 +126,11 @@ func main() {
 				cli.StringFlag{
 					Name:  "name, n",
 					Usage: "Name of the service",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "timeout, t",
+					Usage: "Timeout duration (optional)",
 					Value: "",
 				},
 			},
@@ -165,12 +185,34 @@ func actionDeploy(c *cli.Context) error {
 		}
 	}
 
+	var timeout time.Duration
+	timeoutStr := c.String("timeout")
+	if len(timeoutStr) > 0 {
+		timeout, err = time.ParseDuration(timeoutStr)
+		if err != nil {
+			fmt.Println("Illegal timeout parameter")
+			os.Exit(1)
+		} else if timeout < 0 {
+			fmt.Println("Timeout duration must be positive")
+			os.Exit(1)
+		}
+	}
+
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
 		fmt.Printf("Could not create spawnpoint client: %s\n", err)
 	}
 
-	logChan, errChan := spawnClient.Tail(context.Background(), svcName, spawnpointURI)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout == 0 {
+		ctx = context.Background()
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+	}
+	logChan, errChan := spawnClient.Tail(ctx, svcName, spawnpointURI)
+
 	// Check if an error has already occurred
 	select {
 	case err = <-errChan:
@@ -184,7 +226,11 @@ func actionDeploy(c *cli.Context) error {
 		os.Exit(1)
 	}
 
-	fmt.Println("Tailing service logs. Press CTRL-c to exit...")
+	if timeout == 0 {
+		fmt.Println("Tailing service logs. Press CTRL-c to exit...")
+	} else {
+		fmt.Printf("Tailing service logs for %s. Press CTRL-c to exit early...\n", timeout.String())
+	}
 	for msg := range logChan {
 		fmt.Println(strings.TrimSpace(msg.Contents))
 	}
@@ -228,12 +274,35 @@ func manipulateService(c *cli.Context, command string) error {
 		os.Exit(1)
 	}
 
+	var timeout time.Duration
+	var err error
+	timeoutStr := c.String("timeout")
+	if len(timeoutStr) > 0 {
+		timeout, err = time.ParseDuration(timeoutStr)
+		if err != nil {
+			fmt.Println("Illegal timeout parameter")
+			os.Exit(1)
+		} else if timeout < 0 {
+			fmt.Println("Timeout duration must be positive")
+			os.Exit(1)
+		}
+	}
+
 	spawnClient, err := spawnclient.New(c.GlobalString("router"), entity)
 	if err != nil {
 		fmt.Printf("Could not create spawnpoint client: %s\n", err)
 	}
 
-	logChan, errChan := spawnClient.Tail(context.Background(), svcName, spawnpointURI)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if timeout == 0 {
+		ctx = context.Background()
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+	}
+	logChan, errChan := spawnClient.Tail(ctx, svcName, spawnpointURI)
+
 	// Check if an error has already occurred
 	select {
 	case err = <-errChan:
@@ -260,7 +329,11 @@ func manipulateService(c *cli.Context, command string) error {
 		os.Exit(1)
 	}
 
-	fmt.Println("Tailing service logs. Press CTRL-c to exit...")
+	if timeout == 0 {
+		fmt.Println("Tailing service logs. Press CTRL-c to exit...")
+	} else {
+		fmt.Printf("Tailing service logs for %s. Press CTRL-c to exit early...\n", timeout.String())
+	}
 	for msg := range logChan {
 		fmt.Println(strings.TrimSpace(msg.Contents))
 	}
@@ -301,7 +374,7 @@ func actionScan(c *cli.Context) error {
 
 	if len(heartbeats) == 1 {
 		// Guaranteed to iterate once
-		for uri, _ := range heartbeats {
+		for uri := range heartbeats {
 			daemonHb, svcHbs, err := spawnClient.Inspect(uri)
 			if err != nil {
 				fmt.Printf("Inspect failed: %s\n", err)

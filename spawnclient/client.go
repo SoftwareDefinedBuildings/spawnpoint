@@ -159,7 +159,7 @@ func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-
 	errChan := make(chan error, 1)
 	logChan := make(chan service.LogMessage, 20)
 
-	if err := iFaceClient.SubscribeSignal("log", func(msg *bw2.SimpleMessage) {
+	handle, err := iFaceClient.SubscribeSignalH("log", func(msg *bw2.SimpleMessage) {
 		if len(msg.POs) > 0 {
 			messagePo, ok := msg.POs[0].(bw2.MsgPackPayloadObject)
 			if !ok {
@@ -171,13 +171,13 @@ func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-
 			}
 			logChan <- logMessage
 		}
-	}); err != nil {
+	})
+	if err != nil {
 		close(logChan)
 		errChan <- errors.Wrap(err, "Failed to subscribe to service log")
 		return logChan, errChan
 	}
 
-	tick := time.Tick(30 * time.Second)
 	// Publish keep-alive log messages
 	go func() {
 		if err := iFaceClient.PublishSlot("keepLogAlive"); err != nil {
@@ -185,6 +185,7 @@ func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-
 			errChan <- errors.Wrap(err, "Failed to publish log keep-alive message")
 			return
 		}
+		tick := time.Tick(30 * time.Second)
 		for {
 			select {
 			case <-tick:
@@ -193,7 +194,12 @@ func (sc *SpawnClient) Tail(ctx context.Context, svcName string, uri string) (<-
 					errChan <- errors.Wrap(err, "Failed to publish log keep-alive message")
 					return
 				}
+
 			case <-ctx.Done():
+				if err := sc.bwClient.Unsubscribe(handle); err != nil {
+					errChan <- errors.Wrap(err, "Failed to unsubscribe from log channel")
+				}
+				close(logChan)
 				return
 			}
 		}

@@ -78,7 +78,7 @@ func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, sv
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	for stats := range statChan {
 		daemon.logger.Debugf("(%s) Publishing service heartbeat", svc.Name)
-		daemon.logger.Debugf("(%s) CPU Shares: ~%.2f/%d, Memory: %.2f/%d", svc.Name,
+		daemon.logger.Debugf("(%s) CPU Shares: ~%.2f/%d, Memory: %.2f/%d MiB", svc.Name,
 			stats.CPUShares, svc.CPUShares, stats.Memory, svc.Memory)
 		svcHb := ServiceHeartbeat{
 			Time:          time.Now().UnixNano(),
