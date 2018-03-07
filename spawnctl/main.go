@@ -53,7 +53,7 @@ func main() {
 				},
 				cli.StringFlag{
 					Name:  "configuration, c",
-					Usage: "The configuration to deploy",
+					Usage: "YAML service configuration file",
 					Value: "",
 				},
 				cli.StringFlag{
@@ -196,6 +196,8 @@ func actionDeploy(c *cli.Context) error {
 			fmt.Println("Missing 'name' parameter or 'Name' field in service configuration")
 			os.Exit(1)
 		}
+	} else {
+		config.Name = svcName
 	}
 
 	var timeout time.Duration
