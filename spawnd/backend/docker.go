@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -292,7 +293,10 @@ func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configurat
 		return "", errors.Wrap(err, "Failed to generate Docker build context")
 	}
 
-	imgName := "spawnpoint_" + svcConfig.Name
+	// Docker container names only tolerate a small set of characters
+	encodedName := base32.StdEncoding.EncodeToString([]byte(svcConfig.Name))
+	trimmedName := strings.TrimRight(encodedName, "=")
+	imgName := "spawnpoint_" + strings.ToLower(trimmedName)
 	resp, err := dkr.client.ImageBuild(ctx, buildCtxt, types.ImageBuildOptions{
 		Tags:        []string{imgName},
 		NoCache:     true,
