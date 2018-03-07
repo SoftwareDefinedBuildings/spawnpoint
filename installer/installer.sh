@@ -106,14 +106,14 @@ if [ ! -e /etc/spawnd/config.yml ]; then
 	bw2Entity: {{entity}}
 	path: {{path}}
 	alias: {{alias}}
-	memory: {{memAlloc}}
+	memory: {{memory}}
 	cpuShares: {{cpuShares}}
 	bw2Agent: 172.17.0.1:28589
 	EOF
 
     entity=''
     path=''
-    memAlloc=''
+    memory=''
     cpuShares=''
     if [ -n "$SPAWND_INSTALLER_ENTITY" ]; then
         entity="$SPAWND_INSTALLER_ENTITY"
@@ -131,10 +131,10 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     fi
     sdAlias="$(echo "$path" | awk -F'/' '{print $NF}')"
 
-    if [ -n "$SPAWND_INSTALLER_MEM_ALLOC" ]; then
-        memAlloc="$SPAWND_INSTALLER_MEM_ALLOC"
+    if [ -n "$SPAWND_INSTALLER_MEMORY" ]; then
+        memory="$SPAWND_INSTALLER_MEMORY"
     else
-        memAlloc="$(whiptail --nocancel --inputbox "Memory allocation for this Spawnpoint, in MiB (e.g. 2048):" \
+        memory="$(whiptail --nocancel --inputbox "Memory allocation for this Spawnpoint, in MiB (e.g. 2048):" \
                     10 78 --title "Memory Allocation" 3>&1 1>&2 2>&3)"
     fi
 
@@ -151,7 +151,7 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     $sh_c "sed -i 's#{{entity}}#/etc/spawnd/$entityFile#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{path}}#$path#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{alias}}#$sdAlias#' /etc/spawnd/config.yml"
-    $sh_c "sed -i 's#{{memAlloc}}#$memAlloc#' /etc/spawnd/config.yml"
+    $sh_c "sed -i 's#{{memory}}#$memory#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{cpuShares}}#$cpuShares#' /etc/spawnd/config.yml"
     $sh_c "chown spawnd:spawnd /etc/spawnd/config.yml"
 
