@@ -420,7 +420,12 @@ func actionScan(c *cli.Context) error {
 		fmt.Println("Missing 'entity' parameter")
 		os.Exit(1)
 	}
-	baseURI := fixBaseURI(c.String("uri"))
+
+	uri := c.String("uri")
+	if len(uri) == 0 && len(c.Args()) > 0 {
+		uri = c.Args()[0]
+	}
+	baseURI := fixBaseURI(uri)
 	if len(baseURI) == 0 {
 		fmt.Println("Missing 'uri' parameter")
 		os.Exit(1)

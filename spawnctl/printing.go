@@ -38,8 +38,10 @@ func printSpawnpointDetails(uri string, daemonHb *daemon.Heartbeat, svcHbs map[s
 	for name, svcHb := range svcHbs {
 		lastSeen := time.Unix(0, svcHb.Time)
 		duration := time.Now().Sub(lastSeen) / (10 * time.Millisecond) * (10 * time.Millisecond)
-		fmt.Printf("• [%s] seen %s (%s) ago.\n", name, lastSeen.Format(time.RFC822), duration.String())
-		fmt.Printf("  CPU: ~%.2f/%d Shares. Memory: %.2f/%d MiB\n", svcHb.UsedCPUShares, svcHb.CPUShares,
-			svcHb.UsedMemory, svcHb.Memory)
+		if duration < healthHorizon {
+			fmt.Printf("• [%s] seen %s (%s) ago.\n", name, lastSeen.Format(time.RFC822), duration.String())
+			fmt.Printf("  CPU: ~%.2f/%d Shares. Memory: %.2f/%d MiB\n", svcHb.UsedCPUShares, svcHb.CPUShares,
+				svcHb.UsedMemory, svcHb.Memory)
+		}
 	}
 }
