@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/backend"
@@ -47,7 +48,17 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			if err := daemon.publishLogMessage(svc.Name, "[INFO] Launching service..."); err != nil {
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
-			svcID, err := daemon.backend.StartService(ctx, svc.Configuration)
+
+			msgs := make(chan string, 20)
+			go func() {
+				for msg := range msgs {
+					if err := daemon.publishLogMessage(svc.Name, strings.TrimSpace(msg)); err != nil {
+						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+					}
+				}
+			}()
+
+			svcID, err := daemon.backend.StartService(ctx, svc.Configuration, msgs)
 			if err != nil {
 				daemon.logger.Errorf("(%s) Failed to start service: %s", svc.Name, err)
 				if err = daemon.publishLogMessage(svc.Name, fmt.Sprintf("[ERROR] Failed to start service: %s", err)); err != nil {

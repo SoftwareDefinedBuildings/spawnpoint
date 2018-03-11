@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"path/filepath"
 	"strings"
 	"time"
@@ -55,6 +54,10 @@ type dockerStatsResponse struct {
 	} `json:"memory_stats"`
 }
 
+type imageBuildMessage struct {
+	Stream string `json:"stream"`
+}
+
 func NewDocker(alias, bw2Router string) (*Docker, error) {
 	client, err := docker.NewEnvClient()
 	if err != nil {
@@ -68,12 +71,14 @@ func NewDocker(alias, bw2Router string) (*Docker, error) {
 	}, nil
 }
 
-func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configuration) (string, error) {
+func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configuration, log chan<- string) (string, error) {
+	defer close(log)
+
 	baseImage := svcConfig.BaseImage
 	if len(baseImage) == 0 {
 		svcConfig.BaseImage = defaultSpawnpointImage
 	}
-	imageName, err := dkr.buildImage(ctx, svcConfig)
+	imageName, err := dkr.buildImage(ctx, svcConfig, log)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to build service Docker container")
 	}
@@ -287,7 +292,7 @@ func (dkr *Docker) ProfileService(ctx context.Context, id string, period time.Du
 	return statChan, errChan
 }
 
-func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configuration) (string, error) {
+func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configuration, log chan<- string) (string, error) {
 	buildCtxt, err := generateBuildContext(svcConfig)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to generate Docker build context")
@@ -308,11 +313,19 @@ func (dkr *Docker) buildImage(ctx context.Context, svcConfig *service.Configurat
 	if err != nil {
 		return "", errors.Wrap(err, "Daemon failed to build image")
 	}
-	defer resp.Body.Close()
-	// We have to do this for an image build to actually occur
-	ioutil.ReadAll(resp.Body)
 
-	return imgName, nil
+	defer resp.Body.Close()
+	decoder := json.NewDecoder(resp.Body)
+	var msg imageBuildMessage
+	for {
+		if err := decoder.Decode(&msg); err != nil {
+			if err != io.EOF {
+				return "", errors.Wrap(err, "Failed to read image build output")
+			}
+			return imgName, nil
+		}
+		log <- msg.Stream
+	}
 }
 
 func generateDockerFile(config *service.Configuration) (*[]byte, error) {

@@ -8,7 +8,7 @@ import (
 )
 
 type ServiceBackend interface {
-	StartService(ctx context.Context, config *service.Configuration) (string, error)
+	StartService(ctx context.Context, config *service.Configuration, log chan<- string) (string, error)
 	RestartService(ctx context.Context, id string) error
 	StopService(ctx context.Context, id string) error
 	RemoveService(ctx context.Context, id string) error
