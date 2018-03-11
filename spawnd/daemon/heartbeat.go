@@ -28,8 +28,8 @@ type ServiceHeartbeat struct {
 }
 
 func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time.Duration) {
-	bw2Iface := daemon.bw2Service.RegisterInterface("daemon", "i.spawnpoint")
 	tick := time.Tick(delay)
+	daemon.publishHeartbeatAux()
 	for {
 		select {
 		case <-ctx.Done():
@@ -37,39 +37,45 @@ func (daemon *SpawnpointDaemon) publishHearbeats(ctx context.Context, delay time
 			return
 
 		case <-tick:
-			daemon.resourceLock.RLock()
-			availableCPU := daemon.availableCPUShares
-			availableMemory := daemon.availableMemory
-			daemon.resourceLock.RUnlock()
-			daemon.logger.Debug("Publishing daemon heartbeat")
-			daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.totalCPUShares,
-				availableMemory, daemon.totalMemory)
-
-			daemon.registryLock.RLock()
-			services := make([]string, len(daemon.serviceRegistry))
-			i := 0
-			for name := range daemon.serviceRegistry {
-				services[i] = name
-				i++
-			}
-			daemon.registryLock.RUnlock()
-
-			hb := Heartbeat{
-				Version:         util.VersionNum,
-				Time:            time.Now().UnixNano(),
-				TotalCPU:        daemon.totalCPUShares,
-				TotalMemory:     daemon.totalMemory,
-				AvailableCPU:    availableCPU,
-				AvailableMemory: availableMemory,
-				Services:        services,
-			}
-			hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, hb)
-			if err != nil {
-				daemon.logger.Errorf("Failed to marshal heartbeat: %s", err)
-			} else if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
-				daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
-			}
+			daemon.publishHeartbeatAux()
 		}
+	}
+}
+
+func (daemon *SpawnpointDaemon) publishHeartbeatAux() {
+	bw2Iface := daemon.bw2Service.RegisterInterface("daemon", "i.spawnpoint")
+
+	daemon.resourceLock.RLock()
+	availableCPU := daemon.availableCPUShares
+	availableMemory := daemon.availableMemory
+	daemon.resourceLock.RUnlock()
+	daemon.logger.Debug("Publishing daemon heartbeat")
+	daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.totalCPUShares,
+		availableMemory, daemon.totalMemory)
+
+	services := make([]string, len(daemon.serviceRegistry))
+	daemon.registryLock.RLock()
+	i := 0
+	for name := range daemon.serviceRegistry {
+		services[i] = name
+		i++
+	}
+	daemon.registryLock.RUnlock()
+
+	hb := Heartbeat{
+		Version:         util.VersionNum,
+		Time:            time.Now().UnixNano(),
+		TotalCPU:        daemon.totalCPUShares,
+		TotalMemory:     daemon.totalMemory,
+		AvailableCPU:    availableCPU,
+		AvailableMemory: availableMemory,
+		Services:        services,
+	}
+	hbPo, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointHeartbeat, hb)
+	if err != nil {
+		daemon.logger.Errorf("Failed to marshal heartbeat: %s", err)
+	} else if err := bw2Iface.PublishSignal("heartbeat", hbPo); err != nil {
+		daemon.logger.Errorf("Failed to publish daemon heartbeat: %s", err)
 	}
 }
 

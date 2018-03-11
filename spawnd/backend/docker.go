@@ -128,6 +128,8 @@ func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configur
 		return "", errors.Wrap(err, "Failed to create Docker container")
 	}
 	if err = dkr.client.ContainerStart(ctx, createdResult.ID, types.ContainerStartOptions{}); err != nil {
+		// Clean up the created container, but start error takes precedence
+		dkr.client.ContainerRemove(ctx, createdResult.ID, types.ContainerRemoveOptions{})
 		return "", errors.Wrap(err, "Failed to start Docker container")
 	}
 

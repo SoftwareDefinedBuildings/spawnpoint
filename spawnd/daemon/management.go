@@ -71,6 +71,20 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 
+			defer func() {
+				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
+					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
+					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
+						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+					}
+					return
+				}
+				daemon.logger.Debugf("(%s) Service removed successfully", svc.Name)
+				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+				}
+			}()
+
 			svc.ID = svcID
 			daemon.registryLock.Lock()
 			daemon.serviceRegistry[svc.Name] = svc
@@ -92,6 +106,20 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			daemon.availableCPUShares -= svc.CPUShares
 			daemon.availableMemory -= svc.Memory
 			daemon.resourceLock.Unlock()
+
+			defer func() {
+				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
+					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
+					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
+						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+					}
+					return
+				}
+				daemon.logger.Debugf("(%s) Service removed successfully", svc.Name)
+				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+				}
+			}()
 
 			defer func() {
 				daemon.resourceLock.Lock()
@@ -143,17 +171,6 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Stopped service container"); err != nil {
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
-
-			if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-				daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-				}
-				return
-			}
-			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
-				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-			}
 			return
 
 		case service.Die:
@@ -180,9 +197,6 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				// Need to re-initialize container logging
 				go daemon.tailLogs(ctx, svc, false)
 			} else {
-				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
-				}
 				return
 			}
 		}
