@@ -251,7 +251,9 @@ func (dkr *Docker) ProfileService(ctx context.Context, id string, period time.Du
 	go func() {
 		defer response.Body.Close()
 		decoder := json.NewDecoder(response.Body)
-		lastEmitted := time.Now()
+		// Force first results to be returned immediately once stats are available
+		// i.e. do not wait for a period to expire before producing anything
+		lastEmitted := time.Now().Add(-2 * period)
 		lastCPUCores := 0.0
 		for {
 			select {
