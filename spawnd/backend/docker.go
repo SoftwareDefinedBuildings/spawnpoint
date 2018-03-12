@@ -346,8 +346,12 @@ func generateDockerFile(config *service.Configuration) (*[]byte, error) {
 	}
 	dkrFileBuf.WriteString("WORKDIR /srv/spawnpoint\n")
 	dkrFileBuf.WriteString("COPY entity.key entity.key\n")
-	for _, includedFile := range config.IncludedFiles[:len(config.IncludedFiles)-1] {
-		dkrFileBuf.WriteString(fmt.Sprintf("COPY %s %s\n", includedFile, includedFile))
+
+	// Last element of IncludedFiles is an encoded tar of files from client machine
+	if len(config.IncludedFiles) > 0 {
+		for _, includedFile := range config.IncludedFiles[:len(config.IncludedFiles)-1] {
+			dkrFileBuf.WriteString(fmt.Sprintf("COPY %s %s\n", includedFile, includedFile))
+		}
 	}
 	for _, includedDir := range config.IncludedDirectories {
 		baseName := filepath.Base(includedDir)
@@ -397,6 +401,7 @@ func generateBuildContext(config *service.Configuration) (io.Reader, error) {
 	}
 
 	// Add any included files or directories to build context
+	// Last element of IncludedFiles is an encoded tar of files from client machine
 	if len(config.IncludedFiles) > 0 {
 		encoding := config.IncludedFiles[len(config.IncludedFiles)-1]
 		decodedFiles, err := base64.StdEncoding.DecodeString(encoding)
