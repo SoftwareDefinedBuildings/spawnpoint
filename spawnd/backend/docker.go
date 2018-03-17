@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -190,15 +191,34 @@ func (dkr *Docker) TailService(ctx context.Context, id string, log bool) (<-chan
 	go func() {
 		defer close(msgChan)
 		defer hijackResp.Close()
+
+		var msgSize uint32
 		for {
-			msg, err := hijackResp.Reader.ReadString('\n')
-			if err != nil {
+			// Each log-entry has an 8-byte header. First 4 are junk, last 4 give size of message
+			if _, err = hijackResp.Reader.Discard(4); err != nil {
 				if err != io.EOF {
-					errChan <- errors.Wrap(err, "Failed to read container log message")
+					errChan <- errors.Wrap(err, "Failed to read container log entry descriptor")
 				}
 				return
 			}
-			msgChan <- msg
+			if err = binary.Read(hijackResp.Reader, binary.BigEndian, &msgSize); err != nil {
+				errChan <- errors.New("Failed to read container log entry descriptor")
+				return
+			}
+
+			msgContents := make([]byte, msgSize)
+			for totalRead := uint32(0); totalRead < msgSize; {
+				nread, err := hijackResp.Reader.Read(msgContents[totalRead:])
+				if err != nil {
+					if err != io.EOF {
+						errChan <- errors.Wrap(err, "Failed to read container log message")
+					}
+					return
+				}
+				totalRead += uint32(nread)
+			}
+
+			msgChan <- string(msgContents)
 
 			select {
 			case <-ctx.Done():
@@ -376,7 +396,8 @@ func generateDockerFile(config *service.Configuration) (*[]byte, error) {
 	// Last element of IncludedFiles is an encoded tar of files from client machine
 	if len(config.IncludedFiles) > 0 {
 		for _, includedFile := range config.IncludedFiles[:len(config.IncludedFiles)-1] {
-			dkrFileBuf.WriteString(fmt.Sprintf("COPY %s %s\n", includedFile, includedFile))
+			baseName := filepath.Base(includedFile)
+			dkrFileBuf.WriteString(fmt.Sprintf("COPY %s %s\n", baseName, baseName))
 		}
 	}
 	for _, includedDir := range config.IncludedDirectories {
