@@ -53,7 +53,7 @@ func (daemon *SpawnpointDaemon) recoverServices(ctx context.Context) error {
 
 	decoder := gob.NewDecoder(registryFile)
 	var registry map[string]*serviceManifest
-	if err := decoder.Decode(&registry); err != nil {
+	if err = decoder.Decode(&registry); err != nil {
 		return errors.Wrap(err, "Failed to decode service snapshot")
 	}
 	daemon.logger.Debugf("Discovered %v services in snapshot", len(registry))

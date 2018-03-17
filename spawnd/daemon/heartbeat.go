@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/util"
@@ -79,7 +80,8 @@ func (daemon *SpawnpointDaemon) publishHeartbeatAux() {
 	}
 }
 
-func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, svc *serviceManifest, period time.Duration) {
+func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, svc *serviceManifest, period time.Duration, wg *sync.WaitGroup) {
+	defer wg.Done()
 	statChan, errChan := daemon.backend.ProfileService(ctx, svc.ID, period)
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	for stats := range statChan {

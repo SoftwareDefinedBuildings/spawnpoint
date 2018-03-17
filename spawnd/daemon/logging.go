@@ -10,8 +10,16 @@ import (
 	"github.com/pkg/errors"
 )
 
-func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManifest, fromBeginning bool) {
+func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManifest, fromBeginning bool, wg *sync.WaitGroup) {
+	defer wg.Done()
 	logChan, errChan := daemon.backend.TailService(ctx, svc.ID, fromBeginning)
+	select {
+	case err := <-errChan:
+		daemon.logger.Errorf("(%s) Failed to tail logs: %s", svc.Name, err)
+		return
+	default:
+	}
+
 	bw2Iface := daemon.bw2Service.RegisterInterface(svc.Name, "i.spawnable")
 	alive := true
 	aliveMut := sync.Mutex{}
@@ -55,44 +63,31 @@ func (daemon *SpawnpointDaemon) tailLogs(ctx context.Context, svc *serviceManife
 		}
 	}()
 
-	for {
-		select {
-		case message := <-logChan:
-			if len(message) == 0 {
-				daemon.logger.Debugf("(%s) Received empty log message", svc.Name)
-				// This only happens when the channel has been closed
-				// Which happens when container stops running, or when an error has occurred
-				select {
-				case err := <-errChan:
-					daemon.logger.Errorf("(%s) Error occurred while tailing logs: %s", svc.Name, err)
-					return
-				default:
-					return
-				}
+	for msg := range logChan {
+		aliveMut.Lock()
+		if alive {
+			aliveMut.Unlock()
+			po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, service.LogMessage{
+				Contents:  msg,
+				Timestamp: time.Now().UnixNano(),
+			})
+			if err != nil {
+				daemon.logger.Errorf("(%s) Failed to serialize log message: %s", svc.Name, err)
 			}
 
-			aliveMut.Lock()
-			if alive {
-				aliveMut.Unlock()
-				po, err := bw2.CreateMsgPackPayloadObject(bw2.PONumSpawnpointLog, service.LogMessage{
-					Contents:  message,
-					Timestamp: time.Now().UnixNano(),
-				})
-				if err != nil {
-					daemon.logger.Errorf("(%s) Failed to serialize log message: %s", svc.Name, err)
-				}
-
-				if err = bw2Iface.PublishSignal("log", po); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-				}
-			} else {
-				aliveMut.Unlock()
+			if err = bw2Iface.PublishSignal("log", po); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
-			break
-
-		case <-ctx.Done():
-			return
+		} else {
+			aliveMut.Unlock()
 		}
+	}
+
+	// Check if an error occurred while tailing
+	select {
+	case err := <-errChan:
+		daemon.logger.Errorf("(%s) Error occurred while tailing logs: %s", svc.Name, err)
+	default:
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 )
 
 const deploymentHistVar = "SPAWNCTL_HISTORY_FILE"
-const healthHorizon = 2 * time.Minute
+const healthHorizon = 25 * time.Second
 
 func main() {
 	app := cli.NewApp()

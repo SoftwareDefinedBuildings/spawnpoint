@@ -26,6 +26,7 @@ import (
 const defaultSpawnpointImage = "jhkolb/spawnable:amd64"
 const logMaxSize = "50m"
 const cpuSharesPerCore = 1024
+const stopTimeout = 5 * time.Second
 
 type Docker struct {
 	Alias     string
@@ -144,13 +145,26 @@ func (dkr *Docker) RestartService(ctx context.Context, id string) error {
 }
 
 func (dkr *Docker) StopService(ctx context.Context, id string) error {
-	if err := dkr.client.ContainerStop(ctx, id, nil); err != nil {
+	timeout := stopTimeout
+	if err := dkr.client.ContainerStop(ctx, id, &timeout); err != nil {
 		return errors.Wrap(err, "Could not stop Docker container")
 	}
 	return nil
 }
 
 func (dkr *Docker) RemoveService(ctx context.Context, id string) error {
+	// We need to wait for the container to cleanly stop
+	// Unforunately `ContainerStop` in the Docker API doesn't do this for us
+	// It returns as soon as the timeout triggering a SIGKILL expires
+	// and doesn't wait for the outcome of the SIGKILL
+	waitChan, errChan := dkr.client.ContainerWait(ctx, id, container.WaitConditionNotRunning)
+	select {
+	case <-waitChan:
+
+	case err := <-errChan:
+		return errors.Wrap(err, "Failed to wait for Docker container")
+	}
+
 	if err := dkr.client.ContainerRemove(ctx, id, types.ContainerRemoveOptions{}); err != nil {
 		return errors.Wrap(err, "Could not remove Docker container")
 	}
@@ -174,17 +188,23 @@ func (dkr *Docker) TailService(ctx context.Context, id string, log bool) (<-chan
 	}
 
 	go func() {
+		defer close(msgChan)
 		defer hijackResp.Close()
 		for {
 			msg, err := hijackResp.Reader.ReadString('\n')
 			if err != nil {
-				close(msgChan)
 				if err != io.EOF {
 					errChan <- errors.Wrap(err, "Failed to read container log message")
 				}
 				return
 			}
 			msgChan <- msg
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 		}
 	}()
 
@@ -204,6 +224,7 @@ func (dkr *Docker) MonitorService(ctx context.Context, id string) (<-chan Event,
 		close(transformedEvChan)
 		transformedErrChan <- errors.Wrap(err,
 			fmt.Sprintf("Failed to initialize event monitor for container %s", id))
+		return transformedEvChan, transformedErrChan
 	default:
 	}
 
@@ -216,10 +237,16 @@ func (dkr *Docker) MonitorService(ctx context.Context, id string) (<-chan Event,
 					transformedEvChan <- Die
 				default:
 				}
+
 			case err := <-errChan:
 				close(transformedEvChan)
 				transformedErrChan <- errors.Wrap(err,
 					fmt.Sprintf("Failed to retrieve log entry for container %s", id))
+				return
+
+			case <-ctx.Done():
+				close(transformedEvChan)
+				return
 			}
 		}
 	}()
@@ -252,6 +279,7 @@ func (dkr *Docker) ProfileService(ctx context.Context, id string, period time.Du
 
 	go func() {
 		defer response.Body.Close()
+		defer close(statChan)
 		decoder := json.NewDecoder(response.Body)
 		// Force first results to be returned immediately once stats are available
 		// i.e. do not wait for a period to expire before producing anything
@@ -260,13 +288,11 @@ func (dkr *Docker) ProfileService(ctx context.Context, id string, period time.Du
 		for {
 			select {
 			case <-ctx.Done():
-				close(statChan)
 				return
 			default:
 				var statEntry dockerStatsResponse
 				if err := decoder.Decode(&statEntry); err != nil {
-					close(statChan)
-					if err != io.EOF {
+					if err != io.EOF && err != context.Canceled {
 						errChan <- errors.Wrap(err, "Failed to read and decode container stats entry")
 					}
 					return

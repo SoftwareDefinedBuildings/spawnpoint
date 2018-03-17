@@ -4,15 +4,36 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/SoftwareDefinedBuildings/spawnpoint/service"
 	"github.com/SoftwareDefinedBuildings/spawnpoint/spawnd/backend"
 )
 
 func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- struct{}) {
+	var wg sync.WaitGroup
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	restartInProgress := false
+
+	// Cleanup functions
 	defer close(done)
+	defer func() {
+		wg.Wait()
+		if len(svc.ID) > 0 {
+			daemon.logger.Debugf("(%s) Attempting to remove service", svc.Name)
+			if err := daemon.backend.RemoveService(context.Background(), svc.ID); err != nil {
+				daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
+					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+				}
+				return
+			}
+			daemon.logger.Debugf("(%s) Service removed successfully", svc.Name)
+			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
+				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
+			}
+		}
+	}()
 	defer cancelFunc()
 
 	for event := range svc.Events {
@@ -71,20 +92,6 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
 
-			defer func() {
-				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
-					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
-						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-					}
-					return
-				}
-				daemon.logger.Debugf("(%s) Service removed successfully", svc.Name)
-				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-				}
-			}()
-
 			svc.ID = svcID
 			daemon.registryLock.Lock()
 			daemon.serviceRegistry[svc.Name] = svc
@@ -95,9 +102,10 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				daemon.registryLock.Unlock()
 			}()
 
-			go daemon.tailLogs(ctx, svc, true)
-			go daemon.monitorEvents(ctx, svc)
-			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval)
+			wg.Add(3)
+			go daemon.tailLogs(ctx, svc, true, &wg)
+			go daemon.monitorEvents(ctx, svc, &wg)
+			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval, &wg)
 
 		case service.Adopt:
 			daemon.logger.Debugf("(%s) State machine received service adopt event", svc.Name)
@@ -106,20 +114,6 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			daemon.availableCPUShares -= svc.CPUShares
 			daemon.availableMemory -= svc.Memory
 			daemon.resourceLock.Unlock()
-
-			defer func() {
-				if err := daemon.backend.RemoveService(ctx, svc.ID); err != nil {
-					daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
-					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
-						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-					}
-					return
-				}
-				daemon.logger.Debugf("(%s) Service removed successfully", svc.Name)
-				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Removed service container"); err != nil {
-					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
-				}
-			}()
 
 			defer func() {
 				daemon.resourceLock.Lock()
@@ -137,9 +131,10 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				daemon.registryLock.Unlock()
 			}()
 
-			go daemon.tailLogs(ctx, svc, false)
-			go daemon.monitorEvents(ctx, svc)
-			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval)
+			wg.Add(3)
+			go daemon.tailLogs(ctx, svc, true, &wg)
+			go daemon.monitorEvents(ctx, svc, &wg)
+			go daemon.publishServiceHeartbeats(ctx, svc, heartbeatInterval, &wg)
 
 		case service.Restart:
 			daemon.logger.Debugf("(%s) State machine received service restart event", svc.Name)
@@ -155,7 +150,8 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			}
 
 			// Need to re-initialize container logging
-			go daemon.tailLogs(ctx, svc, false)
+			wg.Add(1)
+			go daemon.tailLogs(ctx, svc, false, &wg)
 			// Set flag so that inevitable service die event is ignored
 			restartInProgress = true
 
@@ -168,6 +164,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				}
 				return
 			}
+			daemon.logger.Debugf("(%s) Service stop completed", svc.Name)
 			if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Stopped service container"); err != nil {
 				daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 			}
@@ -191,11 +188,13 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 					}
 					return
 				}
+				daemon.logger.Debugf("(%s) Service restart successful", svc.Name)
 				if err := daemon.publishLogMessage(svc.Name, "[SUCCESS] Restarted service container"); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				// Need to re-initialize container logging
-				go daemon.tailLogs(ctx, svc, false)
+				wg.Add(1)
+				go daemon.tailLogs(ctx, svc, false, &wg)
 			} else {
 				return
 			}
@@ -203,8 +202,9 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 	}
 }
 
-func (daemon *SpawnpointDaemon) monitorEvents(ctx context.Context, svc *serviceManifest) {
-	eventChan, errChan := daemon.backend.MonitorService(context.Background(), svc.ID)
+func (daemon *SpawnpointDaemon) monitorEvents(ctx context.Context, svc *serviceManifest, wg *sync.WaitGroup) {
+	defer wg.Done()
+	eventChan, errChan := daemon.backend.MonitorService(ctx, svc.ID)
 	for event := range eventChan {
 		switch event {
 		case backend.Die:

@@ -141,12 +141,23 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 		return
 	}
 
+	daemon.registryLock.RLock()
+	_, ok = daemon.serviceRegistry[svcConfig.Name]
+	daemon.registryLock.RUnlock()
+	if ok {
+		daemon.logger.Debugf("(%s) Service is already running, ignoring deploy command")
+		if err := daemon.publishLogMessage(svcConfig.Name, "[ERROR] Service is already running on this host"); err != nil {
+			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
+		}
+		return
+	}
+
 	svc := serviceManifest{Configuration: &svcConfig}
 	daemon.addService(&svc, true)
 }
 
 func (daemon *SpawnpointDaemon) addService(svc *serviceManifest, boot bool) {
-	svc.Events = make(chan service.Event)
+	svc.Events = make(chan service.Event, 1)
 	done := make(chan struct{})
 	go daemon.manageService(svc, done)
 	if boot {
