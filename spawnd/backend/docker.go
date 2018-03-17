@@ -28,6 +28,7 @@ const defaultSpawnpointImage = "jhkolb/spawnable:amd64"
 const logMaxSize = "50m"
 const cpuSharesPerCore = 1024
 const stopTimeout = 5 * time.Second
+const pidLimit = 8
 
 type Docker struct {
 	Alias     string
@@ -118,6 +119,7 @@ func (dkr *Docker) StartService(ctx context.Context, svcConfig *service.Configur
 			CPUShares: int64(svcConfig.CPUShares),
 			Memory:    int64(svcConfig.Memory * 1024 * 1024),
 			Devices:   devices,
+			PidsLimit: pidLimit,
 		},
 	}
 	if svcConfig.UseHostNet {

@@ -205,7 +205,7 @@ func actionDeploy(c *cli.Context) error {
 	if len(timeoutStr) > 0 {
 		timeout, err = time.ParseDuration(timeoutStr)
 		if err != nil {
-			fmt.Println("Illegal timeout parameter")
+			fmt.Println("Illegal timeout parameter, must be in Go's time duration format, e.g. '5s'")
 			os.Exit(1)
 		} else if timeout < 0 {
 			fmt.Println("Timeout duration must be positive")

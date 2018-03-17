@@ -19,23 +19,23 @@ const heartbeatInterval = 10 * time.Second
 const persistenceInterval = 30 * time.Second
 
 type Config struct {
-	BW2Entity string `yaml:"bw2Entity"`
-	BW2Agent  string `yaml:"bw2Agent"`
-	Path      string `yaml:"path"`
-	CPUShares uint64 `yaml:"cpuShares"`
-	Memory    uint64 `yaml:"memory"`
-	Backend   string `yaml:"backend"`
+	BW2Entity            string `yaml:"bw2Entity"`
+	BW2Agent             string `yaml:"bw2Agent"`
+	Path                 string `yaml:"path"`
+	CPUShares            uint64 `yaml:"cpuShares"`
+	Memory               uint64 `yaml:"memory"`
+	Backend              string `yaml:"backend"`
+	EnableHostNetworking bool   `yaml:"enableHostNetworking"`
+	EnableDeviceMapping  bool   `yaml:"enableDeviceMapping"`
 }
 
 type SpawnpointDaemon struct {
+	Config
 	bw2Client          *bw2.BW2Client
 	bw2Service         *bw2.Service
 	backend            backend.ServiceBackend
 	logger             *logging.Logger
-	path               string
 	alias              string
-	totalCPUShares     uint64
-	totalMemory        uint64
 	availableCPUShares uint64
 	availableMemory    uint64
 	resourceLock       sync.RWMutex
@@ -56,11 +56,9 @@ func New(config *Config, logger *logging.Logger) (*SpawnpointDaemon, error) {
 
 	pathElements := strings.Split(config.Path, "/")
 	daemon := SpawnpointDaemon{
+		Config:             *config,
 		logger:             logger,
 		alias:              pathElements[len(pathElements)-1],
-		path:               config.Path,
-		totalCPUShares:     config.CPUShares,
-		totalMemory:        config.Memory,
 		availableCPUShares: config.CPUShares,
 		availableMemory:    config.Memory,
 		serviceRegistry:    make(map[string]*serviceManifest),
@@ -147,6 +145,22 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 	if ok {
 		daemon.logger.Debugf("(%s) Service is already running, ignoring deploy command")
 		if err := daemon.publishLogMessage(svcConfig.Name, "[ERROR] Service is already running on this host"); err != nil {
+			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
+		}
+		return
+	}
+
+	if svcConfig.UseHostNet && !daemon.EnableHostNetworking {
+		daemon.logger.Debugf("(%s) Configuration requests use of host network, which is disabled", svcConfig.Name)
+		msg := "[ERROR] Use of host networking stack not allowed on this host"
+		if err := daemon.publishLogMessage(svcConfig.Name, msg); err != nil {
+			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
+		}
+		return
+	} else if len(svcConfig.Devices) > 0 && !daemon.EnableDeviceMapping {
+		daemon.logger.Debugf("(%s) Configuration requests device mapping(s), which are disabled", svcConfig.Name)
+		msg := "[ERROR] Mapping devices into container not allowed on this host"
+		if err := daemon.publishLogMessage(svcConfig.Name, msg); err != nil {
 			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
 		}
 		return

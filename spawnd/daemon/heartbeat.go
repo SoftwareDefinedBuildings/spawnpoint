@@ -51,8 +51,8 @@ func (daemon *SpawnpointDaemon) publishHeartbeatAux() {
 	availableMemory := daemon.availableMemory
 	daemon.resourceLock.RUnlock()
 	daemon.logger.Debug("Publishing daemon heartbeat")
-	daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.totalCPUShares,
-		availableMemory, daemon.totalMemory)
+	daemon.logger.Debugf("CPU: %v/%v, Memory: %v/%v", availableCPU, daemon.CPUShares,
+		availableMemory, daemon.Memory)
 
 	services := make([]string, len(daemon.serviceRegistry))
 	daemon.registryLock.RLock()
@@ -66,8 +66,8 @@ func (daemon *SpawnpointDaemon) publishHeartbeatAux() {
 	hb := Heartbeat{
 		Version:         util.VersionNum,
 		Time:            time.Now().UnixNano(),
-		TotalCPU:        daemon.totalCPUShares,
-		TotalMemory:     daemon.totalMemory,
+		TotalCPU:        daemon.CPUShares,
+		TotalMemory:     daemon.Memory,
 		AvailableCPU:    availableCPU,
 		AvailableMemory: availableMemory,
 		Services:        services,
@@ -117,7 +117,7 @@ func (daemon *SpawnpointDaemon) publishServiceHeartbeats(ctx context.Context, sv
 
 func (daemon *SpawnpointDaemon) Decommission() error {
 	bw2Iface := daemon.bw2Service.RegisterInterface("daemon", "i.spawnpoint")
-	daemon.logger.Debugf("Decomissioning spawnpoint %s", daemon.path)
+	daemon.logger.Debugf("Decomissioning spawnpoint %s", daemon.Path)
 	// A message without any POs is effectively a metadata de-persist
 	if err := bw2Iface.PublishSignal("heartbeat"); err != nil {
 		daemon.logger.Errorf("Failed to publish de-persist message: %s", err)
