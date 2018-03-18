@@ -7,7 +7,7 @@
 #   'wget -qO- https://get.bw2.io/spawnpoint | sh'
 
 set -e
-REL="1.0.0-RC1"
+REL="1.0.0-RC2"
 
 command_exists() {
     command -v "$@" > /dev/null 2>&1
@@ -109,6 +109,8 @@ if [ ! -e /etc/spawnd/config.yml ]; then
 	memory: {{memory}}
 	cpuShares: {{cpuShares}}
 	bw2Agent: 172.17.0.1:28589
+	enableHostNetworking: false
+	enableDeviceMapping: false
 	EOF
 
     entity=''
