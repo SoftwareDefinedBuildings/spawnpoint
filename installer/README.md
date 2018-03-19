@@ -18,8 +18,7 @@ This script will then take the following steps:
   1. Check for the necessary dependencies: `bw2` and `docker`
   2. Create a `spawnd` user, if one does not already exist, and add it to the
      `docker` group.
-  3. Pull the latest Spawnpoint daemon container, `jhkolb/spawnd:amd64` from
-     Docker's repository.
+  3. Pull the Spawnpoint daemon container from Docker's repository.
   4. Install a `systemd` unit file to manage execution of the `spawnd` container.
   5. Automatically populate the configuration file in `/etc/spawnd/config.yml`
      By default, this is done through interactive prompts, but each of these
@@ -29,9 +28,8 @@ This script will then take the following steps:
        entity file that will identify this Spawnpoint for all Bosswave operations.
        Note that this file will be copied into `/etc/spawnd/`.
      * `path` (`$SPAWND_INSTALLER_PATH`): The base Bosswave URI for the Spawnpoint.
-     * `memAlloc` (`$SPAWND_INSTALLER_MEM_ALLOC`): The total amount of memory to
-       allocate for the containers running on this Spawnpoint. Remember, this is
-       either in MiB by default or in GiB with a "G" suffix on the string.
+     * `memory` (`$SPAWND_INSTALLER_MEMORY`): The total amount of memory to
+       allocate for the containers running on this Spawnpoint.
      * `cpuShares` (`$SPAWND_INSTALLER_CPU_SHARES`): The total amount of CPU
        shares to allocate to containers running on this Spawnopint. Remember,
        this should be 1024 shares per core.

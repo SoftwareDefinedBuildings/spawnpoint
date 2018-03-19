@@ -152,7 +152,6 @@ if [ ! -e /etc/spawnd/config.yml ]; then
     # / in sed subsitution commands is so mainstream!
     $sh_c "sed -i 's#{{entity}}#/etc/spawnd/$entityFile#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{path}}#$path#' /etc/spawnd/config.yml"
-    $sh_c "sed -i 's#{{alias}}#$sdAlias#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{memory}}#$memory#' /etc/spawnd/config.yml"
     $sh_c "sed -i 's#{{cpuShares}}#$cpuShares#' /etc/spawnd/config.yml"
     $sh_c "chown spawnd:spawnd /etc/spawnd/config.yml"
