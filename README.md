@@ -1,9 +1,9 @@
 # Spawnpoint
 
 Spawnpoint is a platform to deploy managed containers across distributed
-infrastructure while using [Bosswave](https://github.com/immesys/bw2) for access
-control and authentication. It is primarily intended for containerized services
-that communicate over Bosswave.
+infrastructure while using [Bosswave](https://github.com/immesys/bw2) for
+authorization and secure communications. It is primarily intended for
+containerized services that communicate using Bosswave.
 
 A "Spawnpoint" is a host, e.g., a cloud-based virtual machine or on-premises
 server, that supports service execution by providing storage, Bosswave
@@ -19,17 +19,53 @@ as messages on the associated Bosswave URIs (topics). The daemon also publishes
 Bosswave messages to advertise available resources on the host.
 
 ## Components
-* `spawnd` is the Spawnpoint host management daemon process. Each Spawnpoint
-  instance is backed by a running daemon that provides a Bosswave interface for
+### Executables
+* `spawnd` is the Spawnpoint host management daemon. Each Spawnpoint instance
+  is backed by a running daemon that provides a Bosswave interface for
   the deployment and control of services and manages service resource
   consumption.
 * `spawnctl` is a command line tool for interaction with Spawnpoint daemons. It
   can be used to discover available Spawnpoints, to deploy a new service, or to
   restart and stop existing services.
-* `spawnclient` is a library that enables interaction with Spawnpoint daemons
-  from Go programs. It provides the same set of capabilities as `spawnctl`.
-* `spawnable` provides utilities for easy development of Spawnpoint services in
-  Go.
+
+### Go Libraries
+* `spawnclient` enables interaction with Spawnpoint daemons from Go programs.
+   It provides the same set of capabilities as `spawnctl` -- scanning for
+   Spawnpoints, deploying configurations, etc.
+* `spawnable` provides utilities for easy development of Go code that will run
+  inside Spawnpoint containers.
+
+## Bosswave Prerequisites
+In order to make effective use of Spawnpoint, you will need to know how to use
+Bosswave. In particular, Bosswave's permissions model is used to control all
+interactions with Spawnpoint daemons. This determines who may see a Spawnpoint
+when searching, who may deploy services to a Spawnpoint instance, who may view
+the state of those services, and who may manipulate services once they are
+running.
+
+Thus, you will need to manipulate permissions on Bosswave URIs in order to
+achieve security with Spawnpoint. For example, to grant someone full access to
+a Spawnpoint running at the Bosswave URI `oski/spawnpoint/alpha`, grant them
+Bosswave publish and subscribe permissions on `oski/spawnpoint/alpha/*`.
+
+Continuing with this example, the full URI hierarchy of the Spawnpoint is:
+`oski/spawnpoint/alpha/s.spawnpoint/`:
+  1. `daemon/i.spawnpoint/`: Signals and slots for the Spawnpoint daemon itself
+    * `signal/heartbeat`: Periodic heartbeat messages indicating current status
+    * `slot/config`: Accepts YAML manifests for new services
+  2. `<service_name>/i.spawnable/`: Signals and slots specific to a running service
+    * `signal/heartbeat`: Periodic heartbeat messages indicating service's status
+    * `signal/log`: Log messages emitted by the service
+    * `slot/restart`: Accepts commands to restart the service
+    * `slot/stop`: Accepts commands to stop the service
+
+For example, an entity that can consume Spawnpoint heartbeat messages, but do
+nothing else, has subscribe permissions on
+`oski/spawnpoint/alpha/s.spawpnoint/daemon/i.spawnpoint/signal/heartbeat`.
+
+An entity that can only interact with a specific service, named `demosvc`,
+running on the Spawnpoint has publish and subscribe permissions on
+`oski/spawnpoint/alpha/s.spawnpoint/demosvc/i.spawnable/*`.`
 
 ## Writing a Spawnpoint Service
 See the [wiki[(https://github.com/SoftwareDefinedBuildings/spawnpoint/wiki/Writing-a-Spawnpoint-Service-in-Go)
@@ -38,6 +74,7 @@ the recommended implementation language.
 
 ## Interacting with Spawnpoints Using `spawnctl`
 The `spawnctl` command line utility is the simplest way to communicate with
+h
 hosts that make themselves available for service execution by running the
 Spawnpoint daemon (`spawnd`).
 
@@ -89,11 +126,11 @@ either in the configuration file or directly on the command line by the `-n`
 flag.
 
 To run a service named `demosvc` with a configuration specified in the file
-`deploy.yml` (more on configurations below), on a Spawnpoint operating at
+`deploy.yaml` (more on configurations below), on a Spawnpoint operating at
 the base Bosswave URI `scratch.ns/spawnpoint/alpha`:
 
 ```
-$ spawnctl deploy -u scratch.ns/spawnpoint/alpha -c deploy.yml -n demosvc
+$ spawnctl deploy -u scratch.ns/spawnpoint/alpha -c deploy.yaml -n demosvc
 Tailing service logs. Press CTRL-c to exit...
 <snip>
 [SUCCESS] Service container has started
@@ -116,44 +153,54 @@ Each service that runs on a Spawnpoint has its configuration specified in a YAML
 file containing a sequence of key-value parameters. The following parameters are
 required for any service:
 * `cpuShares`: The number of CPU shares to reserve for this service. 1024 shares
-  equals one core of the host machine.
-* `memory`: The amount of memory, in MiB, to reserve for this service.
-* `run`: The entrypoint command for the service container, e.g. running a script
-  or invoking an executable file.
+  equals one core of the host machine. Example: `512`
+* `memory`: The amount of memory, in MiB, to reserve for this service. No units
+   are required. Example: `1024`
+* `run`: The command executed when the service container is started, e.g.
+  running a script or invoking an executable file. This is in the form of an
+  argument vector, i.e. a list of strings that together form a single shell
+  command. Example: `[python, script.py, 34]`.
 
 The following configuration parameters are optional, but allow a service to make
 use of other important Spawnpoint features.
-* `bw2Entity`: The Bosswave entity file that is used to identify the service. This
-  is injected into the container as the file `/srv/spawnpoint/entity.key`.
-  Within the container, the `BW2_DEFAULT_ENTITY` environment variable is set to
-  this path.
+* `bw2Entity`: A path to a Bosswave entity file on the deploying host that will
+  be injected into the service's container as the file
+  `/srv/spawnpoint/entity.key`, which is also the value of the
+  `BW2_DEFAULT_ENTITY` environment variable within the container. Example:
+  `/home/oski/bosswave/keys/thermostatDriver.ent`.
 * `image`: An alternative Docker image to use as the base for a service
-  container. Any publicly available Docker image (e.g., posted on Docker's hub)
-  is acceptable.
+  container, expressed as a path to a publicly accessible Docker repository.
+  Example: `jhkolb/tp-link-plug`.
 * `source`: A GitHub URL (must be HTTPS) pointing to a repository to be cloned
-  before starting the container.
-* `build`: A sequence of commands to run after checking out the necessary
-  source code, e.g., for documentation.
+  into the container's working directory (`/srv/spawnpoint`). Example:
+  `git+https://github.com/jhkolb/demosvc`.
+* `build`: A sequence of shell commands to run after checking out the necessary
+  source code, e.g., for documentation. These are _not_ in an argument vector
+  format; each list element is a complete command. Example:
+  `[go get -d, go build -o demosvc]`.
 * `autoRestart`: A boolean specifying if the service's container should be
-  automatically restarted upon termination. Defaults to `false`.
-* `includedFiles`: A list of files on the deploying host that should be included
-  in the container. All files are copied directly into the Spawnpoint
+  automatically restarted upon termination. Defaults to `false`. Example: `true`
+* `includedFiles`: A list of paths to files on the deploying host that should be
+  included in the container. All files are copied directly into the Spawnpoint
   container's working directory (`/srv/spawnpoint`) but retain their original
-  names.
+  names. Example: [demosvc, params.yaml, /home/oski/script.py]`
 * `includedDirectories`: A list of directories on the deploying host to include
   in the Spawnpoint container. All directories retain their names, but are
-  placed under `/srv/spawnpoint` within the container.
+  placed under `/srv/spawnpoint` within the container. Example:
+  `[/home/oski/configurations,]`.
 * `volumes`: A list of volume names to be used by the container. If a volume
   does not exist on the hosting Spawnpoint, it will be created. Otherwise, the
   existing volume is attached to the container. All volumes are mounted under
   the `/srv` directory, so a volume named `foo` is available within the
-  container as `/srv/foo`.
-* `useHostNet`: If the hosting Spawnpoint daemon allows it, service containers
-  may directly use the host machine's network stack rather than Docker's bridge
-  interface. _Note that this presents a security risk_.
+  container as `/srv/foo`. Example: `[thermotatHistory, configurations]`.
+* `useHostNet`: A boolean specifying if the service container should use the
+  Spawnpoint host's networking stack rather than Docker's bridge interface. This
+  must be explicitly enabled by the host's daemon because it _represents a
+  security risk_. Defaults to `false`. Example: `true`.
 * `devices`: A list of device file paths to map from the host machine into the
   Spawnpoint container. This functionality must be specifically enabled by the
-  host daemon, because it _represents a security risk_.
+  host daemon, because it _represents a security risk_. Example:
+  `[/dev/tty4, /dev/tty8, /dev/tty15]`.
 
 ### Conveniently Re-running a Deployment
 You can use the `deploy-last` command to rerun the same `deploy` command that
@@ -163,7 +210,7 @@ immediately after the `deploy` command given above:
 ```
 $ spawnctl deploy-last
 This will run:
-    spawnctl deploy -e <BW2 Entity> -u scratch.ns/spawnpoint.alpha -c deploy.yml -n demosvc
+    spawnctl deploy -e <BW2 Entity> -u scratch.ns/spawnpoint.alpha -c deploy.yaml -n demosvc
 Proceed? [Y/n]
 ```
 To confirm execution of the command, type in `Y` or `y` and hit `<ENTER>`. To
@@ -202,7 +249,7 @@ following preliminary steps:
 We have provided a Spawnpoint installation shell script. The easiest way to use
 it is to run the following command:
 ```
-$ curl get.bw2.io/spawnpoint | bash
+$ curl http://get.bw2.io/spawnpoint | bash
 ```
 
 The script will download the `spawnd` docker container and initialize all of the
