@@ -14,7 +14,7 @@ of service containers, automatically restarting them when they fail, etc.
 
 The Spawnpoint host daemon performs all of its communication via Bosswave,
 meaning it only accepts commands to deploy new services, or to manipulate an
-existing service, from principals that are authorized to issue those Commands
+existing service, from principals that are authorized to issue those commands
 as messages on the associated Bosswave URIs (topics). The daemon also publishes
 Bosswave messages to advertise available resources on the host.
 
@@ -22,6 +22,7 @@ Bosswave messages to advertise available resources on the host.
 ### Executables
 * `spawnd` is the Spawnpoint host management daemon. Each Spawnpoint instance
   is backed by a running daemon that provides a Bosswave interface for
+  instance is backed by a running daemon that provides a Bosswave interface for
   the deployment and control of services and manages service resource
   consumption.
 * `spawnctl` is a command line tool for interaction with Spawnpoint daemons. It
@@ -68,13 +69,12 @@ running on the Spawnpoint has publish and subscribe permissions on
 `oski/spawnpoint/alpha/s.spawnpoint/demosvc/i.spawnable/*`.`
 
 ## Writing a Spawnpoint Service
-See the [wiki[(https://github.com/SoftwareDefinedBuildings/spawnpoint/wiki/Writing-a-Spawnpoint-Service-in-Go)
+See the [wiki](https://github.com/SoftwareDefinedBuildings/spawnpoint/wiki/Writing-a-Spawnpoint-Service-in-Go)
 for a step-by-step walkthrough on writing a Spawnpoint service in Go, which is
 the recommended implementation language.
 
 ## Interacting with Spawnpoints Using `spawnctl`
 The `spawnctl` command line utility is the simplest way to communicate with
-h
 hosts that make themselves available for service execution by running the
 Spawnpoint daemon (`spawnd`).
 
@@ -273,7 +273,7 @@ values, are:
 * `bw2Agent`: The Bosswave agent that should be used by the daemon for all
   pub/sub operations. Defaults to `127.0.0.1:28589`.
 * `enableHostNetworking`: Allow containers to use the host's networking stack.
-  Defaults to `false`. _Enabling this option represents a security risk_.
+  Defaults to `false`. _Enabling host networking represents a security risk_.
 * `enableDeviceMapping`: Allow devices from the host's file system to be mapped
-  into service containers. Defaults to `false`. _Enabling this option represents
+  into service containers. Defaults to `false`. _Enabling device mapping represents
   a security risk_.
