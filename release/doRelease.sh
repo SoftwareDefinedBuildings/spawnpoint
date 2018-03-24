@@ -1,11 +1,11 @@
 #! /bin/bash
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <release_version>"
-    exit 1
-fi
+pushd ../spawnd
+go build
+popd
 
-export SPAWNPOINT_VERSION=$1
+export SPAWNPOINT_VERSION=`../spawnd/spawnd -v | cut -d ' ' -f 3`
+echo "==Shipping release for Spawnpoint $SPAWNPOINT_VERSION=="
 bash build.sh
 python s3push.py
 bash clean.sh
