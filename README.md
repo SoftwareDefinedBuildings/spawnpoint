@@ -66,7 +66,7 @@ nothing else, has subscribe permissions on
 
 An entity that can only interact with a specific service, named `demosvc`,
 running on the Spawnpoint has publish and subscribe permissions on
-`oski/spawnpoint/alpha/s.spawnpoint/demosvc/i.spawnable/*`.`
+`oski/spawnpoint/alpha/s.spawnpoint/demosvc/i.spawnable/*`.
 
 ## Writing a Spawnpoint Service
 See the [wiki](https://github.com/SoftwareDefinedBuildings/spawnpoint/wiki/Writing-a-Spawnpoint-Service-in-Go)
@@ -159,7 +159,7 @@ required for any service:
 * `run`: The command executed when the service container is started, e.g.
   running a script or invoking an executable file. This is in the form of an
   argument vector, i.e. a list of strings that together form a single shell
-  command. Example: `[python, script.py, 34]`.
+  command. Example: `[python, script.py, 34]`
 
 The following configuration parameters are optional, but allow a service to make
 use of other important Spawnpoint features.
@@ -167,40 +167,40 @@ use of other important Spawnpoint features.
   be injected into the service's container as the file
   `/srv/spawnpoint/entity.key`, which is also the value of the
   `BW2_DEFAULT_ENTITY` environment variable within the container. Example:
-  `/home/oski/bosswave/keys/thermostatDriver.ent`.
+  `/home/oski/bosswave/keys/thermostatDriver.ent`
 * `image`: An alternative Docker image to use as the base for a service
   container, expressed as a path to a publicly accessible Docker repository.
-  Example: `jhkolb/tp-link-plug`.
+  Example: `jhkolb/tp-link-plug`
 * `source`: A GitHub URL (must be HTTPS) pointing to a repository to be cloned
   into the container's working directory (`/srv/spawnpoint`). Example:
-  `git+https://github.com/jhkolb/demosvc`.
+  `git+https://github.com/jhkolb/demosvc`
 * `build`: A sequence of shell commands to run after checking out the necessary
   source code, e.g., for documentation. These are _not_ in an argument vector
   format; each list element is a complete command. Example:
-  `[go get -d, go build -o demosvc]`.
+  `[go get -d, go build -o demosvc]`
 * `autoRestart`: A boolean specifying if the service's container should be
   automatically restarted upon termination. Defaults to `false`. Example: `true`
 * `includedFiles`: A list of paths to files on the deploying host that should be
   included in the container. All files are copied directly into the Spawnpoint
   container's working directory (`/srv/spawnpoint`) but retain their original
-  names. Example: [demosvc, params.yaml, /home/oski/script.py]`
+  names. Example: `[demosvc, params.yaml, /home/oski/script.py]`
 * `includedDirectories`: A list of directories on the deploying host to include
   in the Spawnpoint container. All directories retain their names, but are
   placed under `/srv/spawnpoint` within the container. Example:
-  `[/home/oski/configurations,]`.
+  `[/home/oski/configurations,]`
 * `volumes`: A list of volume names to be used by the container. If a volume
   does not exist on the hosting Spawnpoint, it will be created. Otherwise, the
   existing volume is attached to the container. All volumes are mounted under
   the `/srv` directory, so a volume named `foo` is available within the
-  container as `/srv/foo`. Example: `[thermotatHistory, configurations]`.
+  container as `/srv/foo`. Example: `[thermotatHistory, configurations]`
 * `useHostNet`: A boolean specifying if the service container should use the
   Spawnpoint host's networking stack rather than Docker's bridge interface. This
   must be explicitly enabled by the host's daemon because it _represents a
-  security risk_. Defaults to `false`. Example: `true`.
+  security risk_. Defaults to `false`. Example: `true`
 * `devices`: A list of device file paths to map from the host machine into the
   Spawnpoint container. This functionality must be specifically enabled by the
   host daemon, because it _represents a security risk_. Example:
-  `[/dev/tty4, /dev/tty8, /dev/tty15]`.
+  `[/dev/tty4, /dev/tty8, /dev/tty15]`
 
 ### Conveniently Re-running a Deployment
 You can use the `deploy-last` command to rerun the same `deploy` command that
