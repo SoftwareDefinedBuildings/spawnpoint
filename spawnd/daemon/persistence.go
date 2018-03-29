@@ -9,25 +9,34 @@ import (
 	"github.com/pkg/errors"
 )
 
-const manifestFile = ".manifests"
+const persistFileEnvVar = "SPAWNPOINT_PERSIST_FILE"
+const defaultPersistFileName = ".manifests"
 
 func (daemon *SpawnpointDaemon) persistSnapshots(ctx context.Context, delay time.Duration) {
 	tick := time.Tick(delay)
 
 	for {
 		daemon.logger.Debug("Snapshotting running service state to file")
-		registryFile, err := os.Create(manifestFile)
+		persistFileName := os.Getenv(persistFileEnvVar)
+		if len(persistFileName) == 0 {
+			persistFileName = defaultPersistFileName
+		}
+		persistFile, err := os.Create(persistFileName)
 		if err != nil {
 			daemon.logger.Errorf("Failed to open service snapshot file: %s", err)
 			return
 		}
 
-		encoder := gob.NewEncoder(registryFile)
+		encoder := gob.NewEncoder(persistFile)
 		daemon.registryLock.RLock()
 		if err := encoder.Encode(daemon.serviceRegistry); err != nil {
 			daemon.logger.Errorf("Failed to encode running services: %s", err)
 		}
 		daemon.registryLock.RUnlock()
+
+		if err := persistFile.Close(); err != nil {
+			daemon.logger.Errorf("Failed to close service snapshot file: %s", err)
+		}
 
 		// First check if we're done
 		select {
@@ -46,12 +55,18 @@ func (daemon *SpawnpointDaemon) persistSnapshots(ctx context.Context, delay time
 
 func (daemon *SpawnpointDaemon) recoverServices(ctx context.Context) error {
 	daemon.logger.Debug("Attempting to recover previous services from snapshot")
-	registryFile, err := os.Open(manifestFile)
+
+	persistFileName := os.Getenv(persistFileEnvVar)
+	if len(persistFileName) == 0 {
+		persistFileName = defaultPersistFileName
+	}
+	persistFile, err := os.Open(persistFileName)
 	if err != nil {
 		return errors.Wrap(err, "Could not open service snapshot file")
 	}
+	defer persistFile.Close()
 
-	decoder := gob.NewDecoder(registryFile)
+	decoder := gob.NewDecoder(persistFile)
 	var registry map[string]*serviceManifest
 	if err = decoder.Decode(&registry); err != nil {
 		return errors.Wrap(err, "Failed to decode service snapshot")

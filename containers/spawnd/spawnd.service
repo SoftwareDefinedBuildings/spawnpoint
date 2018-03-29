@@ -12,6 +12,7 @@ ExecStart=/usr/bin/docker run \
     -v /etc/spawnd/:/etc/spawnd/ \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -e DOCKER_API_VERSION={{dockerClientVersion}} \
+    -e SPAWNPOINT_PERSIST_FILE="/etc/spawnd/.manifests" \
     jhkolb/spawnd:{{release_version}}
 ExecStop=/usr/bin/docker stop -t 10 %p ; /usr/bin/docker rm -f %p
 
