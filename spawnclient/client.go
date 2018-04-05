@@ -121,23 +121,24 @@ func (sc *Client) Deploy(config *service.Configuration, uri string) error {
 		return errors.Wrap(err, "Invalid service configuration")
 	}
 
-	encodedEntity, err := encodeEntityFile(config.BW2Entity)
+	workingConfig := config.DeepCopy()
+	encodedEntity, err := encodeEntityFile(workingConfig.BW2Entity)
 	if err != nil {
 		return errors.Wrap(err, "Could not encode BW2 entity")
 	}
-	config.BW2Entity = encodedEntity
+	workingConfig.BW2Entity = encodedEntity
 
-	if len(config.IncludedFiles) > 0 {
-		encodedFiles, err := encodeIncludedFiles(config.IncludedFiles, config.IncludedDirectories)
+	if len(workingConfig.IncludedFiles) > 0 {
+		encodedFiles, err := encodeIncludedFiles(workingConfig.IncludedFiles, workingConfig.IncludedDirectories)
 		if err != nil {
 			return errors.Wrap(err, "Could not encode included files for transmission")
 		}
-		config.IncludedFiles = append(config.IncludedFiles, encodedFiles)
+		workingConfig.IncludedFiles = append(workingConfig.IncludedFiles, encodedFiles)
 	}
 
 	svcClient := sc.bwClient.NewServiceClient(uri, "s.spawnpoint")
 	ifaceClient := svcClient.AddInterface("daemon", "i.spawnpoint")
-	configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, config)
+	configPo, err := bw2.CreateYAMLPayloadObject(bw2.PONumSpawnpointConfig, workingConfig)
 	if err != nil {
 		return errors.Wrap(err, "Could not serialize service configuration")
 	}

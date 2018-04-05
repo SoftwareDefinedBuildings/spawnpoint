@@ -17,6 +17,34 @@ type Configuration struct {
 	Devices             []string `yaml:"devices,omitempty"`
 }
 
+func (config *Configuration) DeepCopy() *Configuration {
+    newConfig := Configuration{
+        Name: config.Name,
+        BaseImage: config.BaseImage,
+        Source: config.Source,
+        BW2Entity: config.BW2Entity,
+        CPUShares: config.CPUShares,
+        Memory: config.Memory,
+        AutoRestart: config.AutoRestart,
+        UseHostNet: config.UseHostNet,
+    }
+
+    newConfig.Build = make([]string, len(config.Build))
+    copy(newConfig.Build, config.Build)
+    newConfig.Run = make([]string, len(config.Run))
+    copy(newConfig.Run, config.Run)
+    newConfig.IncludedFiles = make([]string, len(config.IncludedFiles))
+    copy(newConfig.IncludedFiles, config.IncludedFiles)
+    newConfig.IncludedDirectories = make([]string, len(config.IncludedDirectories))
+    copy(newConfig.IncludedDirectories, config.IncludedDirectories)
+    newConfig.Volumes = make([]string, len(config.Volumes))
+    copy(newConfig.Volumes, config.Volumes)
+    newConfig.Devices = make([]string, len(config.Devices))
+    copy(newConfig.Devices, config.Devices)
+
+    return &newConfig
+}
+
 type LogMessage struct {
 	Contents  string
 	Timestamp int64
