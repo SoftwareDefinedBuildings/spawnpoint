@@ -143,7 +143,7 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 	_, ok = daemon.serviceRegistry[svcConfig.Name]
 	daemon.registryLock.RUnlock()
 	if ok {
-		daemon.logger.Debugf("(%s) Service is already running, ignoring deploy command")
+		daemon.logger.Debugf("(%s) Service is already running, ignoring deploy command", svcConfig.Name)
 		if err := daemon.publishLogMessage(svcConfig.Name, "[ERROR] Service is already running on this host"); err != nil {
 			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
 		}
