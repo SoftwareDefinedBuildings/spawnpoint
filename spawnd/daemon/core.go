@@ -144,7 +144,7 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 	daemon.registryLock.RUnlock()
 	if ok {
 		daemon.logger.Debugf("(%s) Service is already running, ignoring deploy command", svcConfig.Name)
-		if err := daemon.publishLogMessage(svcConfig.Name, "[ERROR] Service is already running on this host"); err != nil {
+		if err := daemon.publishLogMessage(svcConfig.Name, "[ERROR 409] Service is already running on this host"); err != nil {
 			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
 		}
 		return
@@ -152,14 +152,14 @@ func (daemon *SpawnpointDaemon) handleConfig(msg *bw2.SimpleMessage) {
 
 	if svcConfig.UseHostNet && !daemon.EnableHostNetworking {
 		daemon.logger.Debugf("(%s) Configuration requests use of host network, which is disabled", svcConfig.Name)
-		msg := "[ERROR] Use of host networking stack not allowed on this host"
+		msg := "[ERROR 403] Use of host networking stack not allowed on this host"
 		if err := daemon.publishLogMessage(svcConfig.Name, msg); err != nil {
 			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
 		}
 		return
 	} else if len(svcConfig.Devices) > 0 && !daemon.EnableDeviceMapping {
 		daemon.logger.Debugf("(%s) Configuration requests device mapping(s), which are disabled", svcConfig.Name)
-		msg := "[ERROR] Mapping devices into container not allowed on this host"
+		msg := "[ERROR 403] Mapping devices into container not allowed on this host"
 		if err := daemon.publishLogMessage(svcConfig.Name, msg); err != nil {
 			daemon.logger.Errorf("(%s) Failed to publish log message", svcConfig.Name)
 		}
@@ -222,7 +222,7 @@ func (daemon *SpawnpointDaemon) manipulateService(name string, operation string,
 		daemon.registryLock.RUnlock()
 		if !ok {
 			daemon.logger.Debugf("(%s) Service not found, ignoring command", name)
-			daemon.publishLogMessage(name, "[ERROR] Service not found")
+			daemon.publishLogMessage(name, "[ERROR 404] Service not found")
 			return
 		}
 

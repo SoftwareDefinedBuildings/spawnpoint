@@ -176,7 +176,7 @@ func TestDuplicateDeploy(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 409)
 
 	t.Log("Stopping service...")
 	if err := spawnClient.Stop(spawnpointURI, "demosvc"); err != nil {
@@ -213,7 +213,7 @@ func TestDeployExcessiveCPU(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 503)
 }
 
 // Attempt to deploy service with too much memory requested
@@ -244,7 +244,7 @@ func TestDeployExcessiveMemory(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 503)
 }
 
 // Attempt to deploy service with too much memory and CPU requested
@@ -275,7 +275,7 @@ func TestDeployExcessiveCPUMemory(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 503)
 }
 
 // Attempt to deploy service on an oversubscribed spawnpoint
@@ -321,7 +321,7 @@ func TestDeployOversubscribed(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan2, errChan2)
+	awaitFailure(t, logChan2, errChan2, 503)
 
 	if err := spawnClient.Stop(spawnpointURI, "demosvc"); err != nil {
 		t.Fatalf("Failed to stop service: %s", err)
@@ -390,7 +390,7 @@ func TestDeployInvalidCPUMemory(t *testing.T) {
 	}
 }
 
-//Attempt to deploy a service with host networking, which isn't allowed
+// Attempt to deploy a service with host networking, which isn't allowed
 func TestDeployHostNetworking(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -418,10 +418,10 @@ func TestDeployHostNetworking(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 403)
 }
 
-//Attempt to deploy a service with mapped devices, which isn't allowed
+// Attempt to deploy a service with mapped devices, which isn't allowed
 func TestDeployDevices(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -449,10 +449,10 @@ func TestDeployDevices(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 403)
 }
 
-//Attempt to deploy a service with host networking and mapped devices, which aren't allowed
+// Attempt to deploy a service with host networking and mapped devices, which aren't allowed
 func TestDeployHostNetDevices(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -481,7 +481,7 @@ func TestDeployHostNetDevices(t *testing.T) {
 	if err := spawnClient.Deploy(&config, spawnpointURI); err != nil {
 		t.Fatalf("Failed to deploy service: %s", err)
 	}
-	awaitFailure(t, logChan, errChan)
+	awaitFailure(t, logChan, errChan, 403)
 }
 
 func awaitSuccess(t *testing.T, logChan <-chan service.LogMessage, errChan <-chan error, successTotal int) {
@@ -505,12 +505,14 @@ func awaitSuccess(t *testing.T, logChan <-chan service.LogMessage, errChan <-cha
 	}
 }
 
-func awaitFailure(t *testing.T, logChan <-chan service.LogMessage, errChan <-chan error) {
+func awaitFailure(t *testing.T, logChan <-chan service.LogMessage, errChan <-chan error, code uint) {
 	for {
 		select {
 		case logMsg := <-logChan:
-			if strings.HasPrefix(logMsg.Contents, "[ERROR]") {
+			if strings.HasPrefix(logMsg.Contents, fmt.Sprintf("[ERROR %d]", code)) {
 				return
+			} else if strings.HasPrefix(logMsg.Contents, "[ERROR") {
+				t.Fatalf("Unexpected error occurred: %s", logMsg.Contents)
 			} else if strings.HasPrefix(logMsg.Contents, "[SUCCESS]") {
 				t.Fatalf("Success occurred when expected failure: %s", logMsg.Contents)
 			}

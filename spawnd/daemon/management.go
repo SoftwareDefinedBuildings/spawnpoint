@@ -23,7 +23,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			daemon.logger.Debugf("(%s) Attempting to remove service", svc.Name)
 			if err := daemon.backend.RemoveService(context.Background(), svc.ID); err != nil {
 				daemon.logger.Errorf("(%s) Failed to remove service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to remove service"); err != nil {
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR 500] Failed to remove service"); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
@@ -56,7 +56,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				}()
 			} else {
 				daemon.logger.Debugf("(%s) Has insufficient CPU and memory for new service, rejecting", svc.Name)
-				msg := fmt.Sprintf("[ERROR] Insufficient resources for service. CPU: Have %v, Want %v. Mem: Have %v, Want %v",
+				msg := fmt.Sprintf("[ERROR 503] Insufficient resources for service. CPU: Have %v, Want %v. Mem: Have %v, Want %v",
 					daemon.availableCPUShares, svc.CPUShares, daemon.availableMemory, svc.Memory)
 				if err := daemon.publishLogMessage(svc.Name, msg); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
@@ -82,7 +82,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			svcID, err := daemon.backend.StartService(ctx, svc.Configuration, msgs)
 			if err != nil {
 				daemon.logger.Errorf("(%s) Failed to start service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svc.Name, fmt.Sprintf("[ERROR] Failed to start service: %s", err)); err != nil {
+				if err = daemon.publishLogMessage(svc.Name, fmt.Sprintf("[ERROR 500] Failed to start service: %s", err)); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
@@ -140,7 +140,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			daemon.logger.Debugf("(%s) State machine received service restart event", svc.Name)
 			if err := daemon.backend.RestartService(ctx, svc.ID); err != nil {
 				daemon.logger.Errorf("(%s) Failed to restart service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to restart service"); err != nil {
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR 500] Failed to restart service"); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
@@ -159,7 +159,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 			daemon.logger.Debugf("(%s) State machine received service stop event", svc.Name)
 			if err := daemon.backend.StopService(ctx, svc.ID); err != nil {
 				daemon.logger.Errorf("(%s) Failed to stop service: %s", svc.Name, err)
-				if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to stop service"); err != nil {
+				if err = daemon.publishLogMessage(svc.Name, "[ERROR 500] Failed to stop service"); err != nil {
 					daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 				}
 				return
@@ -183,7 +183,7 @@ func (daemon *SpawnpointDaemon) manageService(svc *serviceManifest, done chan<- 
 				daemon.logger.Debugf("(%s) Auto-restart enabled, attempting service restart", svc.Name)
 				if err := daemon.backend.RestartService(ctx, svc.ID); err != nil {
 					daemon.logger.Errorf("(%s) Failed to restart service: %s", svc.Name, err)
-					if err = daemon.publishLogMessage(svc.Name, "[ERROR] Failed to restart service"); err != nil {
+					if err = daemon.publishLogMessage(svc.Name, "[ERROR 500] Failed to restart service"); err != nil {
 						daemon.logger.Errorf("(%s) Failed to publish log message: %s", svc.Name, err)
 					}
 					return
