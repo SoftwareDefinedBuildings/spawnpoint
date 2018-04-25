@@ -1,3 +1,3 @@
 package util
 
-const VersionNum = "1.0.0-RC3"
+const VersionNum = "1.0.0"
