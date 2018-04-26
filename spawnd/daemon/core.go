@@ -17,6 +17,7 @@ import (
 
 const heartbeatInterval = 10 * time.Second
 const persistenceInterval = 30 * time.Second
+const monitorInterval = 30 * time.Second
 
 type Config struct {
 	BW2Entity            string `yaml:"bw2Entity"`
@@ -246,13 +247,17 @@ func (daemon *SpawnpointDaemon) StartLoop(ctx context.Context) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		daemon.publishHearbeats(ctx, heartbeatInterval)
 		wg.Done()
 	}()
 	go func() {
 		daemon.persistSnapshots(ctx, persistenceInterval)
+		wg.Done()
+	}()
+	go func() {
+		daemon.monitorHostResources(ctx, monitorInterval)
 		wg.Done()
 	}()
 	wg.Wait()
