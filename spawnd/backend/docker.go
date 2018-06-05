@@ -483,7 +483,7 @@ func (dkr *Docker) createMounts(ctx context.Context, volumeNames []string) ([]mo
 	mounts := make([]mount.Mount, len(volumeNames))
 	for i, volumeName := range volumeNames {
 		if _, ok := existingVolumes[volumeName]; !ok {
-			if _, err := dkr.client.VolumeCreate(ctx, volume.VolumesCreateBody{Name: volumeName}); err != nil {
+			if _, err := dkr.client.VolumeCreate(ctx, volume.VolumeCreateBody{Name: volumeName}); err != nil {
 				return nil, errors.Wrap(err, "Failed to create Docker volume")
 			}
 		}
