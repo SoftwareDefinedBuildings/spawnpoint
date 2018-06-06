@@ -23,7 +23,7 @@ func (daemon *SpawnpointDaemon) monitorHostResources(ctx context.Context, delay 
 			return
 
 		case <-tick:
-			percentages, err := cpu.PercentWithContext(ctx, delay, false)
+			percentages, err := cpu.PercentWithContext(ctx, 0, false)
 			if err != nil {
 				daemon.logger.Errorf("Failed to obtain CPU consumption: %s", err)
 				continue
