@@ -51,12 +51,12 @@ func (daemon *SpawnpointDaemon) monitorHostResources(ctx context.Context, delay 
 					totalCPUs, advertisedCPUShares)
 			}
 
-			availableMem := memStatus.Available / (1024.0 * 1024.0) // Convert bytes to MiB
-			if memStatus.Available/(1024.0*1024.0) < advertisedMem {
+			availableMem := float64(memStatus.Available) / (1024 * 1024) // Convert bytes to MiB
+			if availableMem < float64(advertisedMem) {
 				daemon.logger.Warningf("Host memory appears overloaded: %.2f MiB available while advertising %d MiB",
 					availableMem, advertisedMem)
 			} else {
-				daemon.logger.Debugf("%d MiB of memory available, advertising %d MiB", availableMem, advertisedMem)
+				daemon.logger.Debugf("%.2f MiB of memory available, advertising %d MiB", availableMem, advertisedMem)
 			}
 		}
 	}
