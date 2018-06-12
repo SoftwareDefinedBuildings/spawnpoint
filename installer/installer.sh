@@ -2,9 +2,9 @@
 # This script is based on the Bosswave install script
 # The Bosswave install script was in turn based on the Docker install script
 # It should be used with
-#   'curl -sSL https://get.bw2.io/spawnpoint | sh'
+#   'curl http://get.bw2.io/spawnpoint | sh'
 # Or:
-#   'wget -qO- https://get.bw2.io/spawnpoint | sh'
+#   'wget -qO- http://get.bw2.io/spawnpoint | sh'
 
 set -e
 REL="{{release}}"
@@ -15,7 +15,7 @@ command_exists() {
 
 do_install() {
 
-echo "Automated installer for Spawnd $REL"
+echo "Automated installer for spawnd $REL"
 
 sh_c='sh -c'
 if [ "$user" != 'root' ]; then
@@ -37,16 +37,17 @@ elif command_exists wget; then
     curl='wget -qO-'
 fi
 
-if [ "$(uname -m)" != "x86_64" ]; then
-    echo "Sorry, the Spawnd installer only supports x86_64 for now"
+ARCH="$(uname -m)"
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+fi
+if [ "$ARCH" != "amd64" ] && [ "$ARCH" != "armv7l" ]; then
+    echo "Sorry, the spawnd installer only supports x86_64 and armv7lfor now"
     exit 1
 fi
+
 if [ "$(uname -s)" != "Linux" ]; then
-    echo "Sorry, the Spawnd installer only supports Linux for now"
-    exit 1
-fi
-if [ ! -e /etc/issue ] || [ "$(cut -d' ' -f 1 /etc/issue)" != "Ubuntu" ]; then
-    echo "Sorry, the Spawnd installer only supports Ubuntu for now"
+    echo "Sorry, the spawnd installer only supports Linux for now"
     exit 1
 fi
 
@@ -65,12 +66,12 @@ if [ $? != 0 ]; then
     exit 1
 fi
 
-if ! command_exists bw2; then
-    echo "Unmet spawnd requirement: bw2"
+if ! command_exists bw2 && ! command_exists ragent; then
+    echo "Unmet spawnd requirement: bw2 or ragent"
     exit 1
 fi
-if [ "$(pidof bw2)" = "" ]; then
-    echo "Error: bw2 appears to be installed but is not running"
+if [ "$(pidof bw2)" = "" ] && [ "$(pidof ragent)" = "" ]; then
+    echo "Error: Neither bw2 nor ragent is currently running"
     exit 1
 fi
 
@@ -90,15 +91,16 @@ set -e
 $sh_c 'chown -R spawnd:spawnd /etc/spawnd'
 
 echo "Pulling latest spawnd docker container"
-$sh_c "docker pull jhkolb/spawnd:$REL"
+$sh_c "docker pull jhkolb/spawnd:$REL"-"$ARCH"
 
 set +e
 $sh_c "systemctl stop spawnd"
 set -e
-$sh_c "$curl http://get.bw2.io/spawnd/1.x/linux/amd64/$REL/spawnd.service > /etc/systemd/system/spawnd.service"
+$sh_c "$curl http://get.bw2.io/spawnd/1.x/linux/$ARCH/$REL/spawnd.service > /etc/systemd/system/spawnd.service"
 dockerClientVersion="$(docker version -f {{.Client.APIVersion}})"
 $sh_c "sed -i 's/{{dockerClientVersion}}/$dockerClientVersion/' /etc/systemd/system/spawnd.service"
 $sh_c "sed -i 's/{{release_version}}/$REL/' /etc/systemd/system/spawnd.service"
+$sh_c "sed -i 's/{{machine_architecture}}/$ARCH/' /etc/systemd/system/spawnd.service"
 $sh_c "systemctl daemon-reload"
 $sh_c "systemctl enable spawnd"
 
@@ -162,6 +164,7 @@ if [ ! -e /etc/spawnd/config.yml ]; then
 
 fi
 
+$sh_c "systemctl daemon-reload"
 $sh_c "systemctl start spawnd"
 }
 

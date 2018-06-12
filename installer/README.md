@@ -6,19 +6,16 @@ Bosswave, installation and updating are done like so:
 curl get.bw2.io/spawnpoint | bash
 ```
 
-Currently, the script only supports 64-bit Ubuntu Linux installations that use
-`systemd` (i.e. versions 16.04 and later). The script should fail gracefully
+Currently, the script only supports `amd64` and `armv7l` versions of Linux that
+use `systemd` (e.g., Ubuntu 16.04 and later). The script should fail gracefully
 when run on other platforms.
 
-Additionally, the installer currently does not configure the metadata that is
-advertised by the spawnpoint. To do this, you must edit `/etc/spawnd/metadata.yml`
-manually.
-
 This script will then take the following steps:
-  1. Check for the necessary dependencies: `bw2` and `docker`
+  1. Check for the necessary dependencies: either `bw2` or `ragent` as well as
+     `docker`
   2. Create a `spawnd` user, if one does not already exist, and add it to the
      `docker` group.
-  3. Pull the Spawnpoint daemon container from Docker's repository.
+  3. Pull the appropriate Spawnpoint daemon container from Docker's repository.
   4. Install a `systemd` unit file to manage execution of the `spawnd` container.
   5. Automatically populate the configuration file in `/etc/spawnd/config.yml`
      By default, this is done through interactive prompts, but each of these

@@ -6,14 +6,14 @@ go build
 popd
 pushd ../containers/spawnd
 cp ../../spawnd/spawnd .
-docker build --pull --no-cache -t jhkolb/spawnd:$SPAWNPOINT_VERSION .
-docker push jhkolb/spawnd:$SPAWNPOINT_VERSION
+docker build --pull --no-cache -t jhkolb/spawnd:$SPAWNPOINT_VERSION"-"$ARCH .
+docker push jhkolb/spawnd:$SPAWNPOINT_VERSION"-"$ARCH
 popd
 
 # Rebuild spawnable container
 pushd ../containers/spawnable
-docker build --pull --no-cache -t jhkolb/spawnable:amd64 .
-docker push jhkolb/spawnable:amd64
+docker build --pull --no-cache -t jhkolb/spawnable:$ARCH .
+docker push jhkolb/spawnable:$ARCH
 popd
 
 # Compile spawnctl binary
